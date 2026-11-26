@@ -1,0 +1,16 @@
+.git
+.gitignore
+.github
+node_modules
+data
+data-demo
+data-test
+.env
+.env.*
+!.env.example
+shots
+tests
+demo
+scripts
+docs
+*.log

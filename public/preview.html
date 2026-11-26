@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>设备预览 · E-dreikanterbot</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 28px;
+        background: radial-gradient(120% 90% at 50% 0%, #1c2233, #0b0d12 60%);
+        color: #cfd4e2;
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      .label {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #8f97ab;
+        margin-bottom: 2px;
+      }
+      .frame {
+        background: #151922;
+        border: 1px solid #2a3140;
+        border-radius: 24px;
+        padding: 12px;
+        box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.8);
+      }
+      iframe {
+        display: block;
+        border: 0;
+        border-radius: 14px;
+        background: #f7f7f5;
+        width: 1180px;
+        height: 820px;
+      }
+      .tip {
+        font-size: 11px;
+        color: #6e768a;
+      }
+      .tip a {
+        color: #8fa5ff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="label" id="label">Device preview</div>
+    <div class="frame"><iframe id="frame" src="/" title="E-dreikanterbot 预览"></iframe></div>
+    <div class="tip">
+      <a href="/" target="_top">打开完整页面</a> · 仅用于不同视口下的视觉检查
+    </div>
+    <script src="/preview.js"></script>
+  </body>
+</html>

@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>E-dreikanterbot · DeepSeek 原生聊天机器人</title>
+    <meta name="description" content="E-dreikanterbot：按 DeepSeek 官方 API 打造的聊天机器人，支持深度思考、长期记忆库、图片理解、联网搜索与 OpenAI 兼容接口。" />
+    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="E-dreikanterbot" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/styles.css?v=5" />
+  </head>
+  <body>
+    <svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true">
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20.5 20.5-4.2-4.2" /></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6" /></symbol>
+      <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 3.5a3 3 0 0 0-3 3v.7a3 3 0 0 0-1 5.6v1.6a3 3 0 0 0 3 3h1v2.1h4v-2.1h1a3 3 0 0 0 3-3v-1.6a3 3 0 0 0-1-5.6v-.7a3 3 0 0 0-3-3 2.6 2.6 0 0 0-4 0Z" /><path d="M12 4v15" /></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" /></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z" /></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" /></symbol>
+      <symbol id="i-clip" viewBox="0 0 24 24"><path d="M21.4 11.05 12.25 20.2a6 6 0 0 1-8.49-8.49l8.57-8.57a4 4 0 0 1 5.66 5.66l-8.58 8.57a2 2 0 0 1-2.83-2.83l7.07-7.07" /></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12" /></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 8l5-5 5 5M12 3v12" /></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z" /></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 4 4H6l4-4-1-6Z" /></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" /></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7M21 3v6h-6" /></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v5M12 17h.01" /></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 4l3 3M14 7l3 3" /></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="2" /><path d="m21 15-4.5-4.5L7 21" /></symbol>
+      <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7" /></symbol>
+      <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.7 0-1.26.45-2.29 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.73.8 1.18 1.83 1.18 3.09 0 4.43-2.69 5.41-5.25 5.69.41.36.78 1.06.78 2.14 0 1.55-.01 2.8-.01 3.18 0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5Z" /></symbol>
+    </svg>
+
+    <div class="app">
+      <div class="backdrop" id="backdrop" hidden></div>
+
+      <aside class="sidebar" id="sidebar" aria-label="会话与导航">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">E<span></span></div>
+          <div class="brand-text">
+            <strong>E-dreikanterbot</strong>
+            <span>DeepSeek 原生 · 记忆增强</span>
+          </div>
+          <button class="icon-btn only-mobile" data-action="close-sidebar" aria-label="关闭侧栏">
+            <svg class="icon"><use href="#i-x" /></svg>
+          </button>
+        </div>
+
+        <button class="new-chat" data-action="new-chat">
+          <svg class="icon"><use href="#i-plus" /></svg>
+          <span>新对话</span>
+          <kbd>⌘K</kbd>
+        </button>
+
+        <div class="search">
+          <svg class="icon"><use href="#i-search" /></svg>
+          <input id="conv-search" type="search" placeholder="搜索对话" autocomplete="off" />
+        </div>
+
+        <nav class="conv-list" id="conv-list" aria-label="历史对话"></nav>
+
+        <div class="sidebar-foot">
+          <button class="foot-btn" data-action="open-memory">
+            <svg class="icon"><use href="#i-brain" /></svg>
+            <span>记忆库</span>
+            <span class="pill" id="memory-count">0</span>
+          </button>
+          <button class="foot-btn" data-action="open-settings">
+            <svg class="icon"><use href="#i-sliders" /></svg>
+            <span>参数与设置</span>
+          </button>
+          <div class="foot-links">
+            <a id="github-link" href="https://github.com/Ansel-official/E-dreikanterbot" target="_blank" rel="noopener">
+              <svg class="icon"><use href="#i-github" /></svg> GitHub
+            </a>
+            <span>·</span>
+            <a id="icp-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">ICP 备案</a>
+          </div>
+          <div class="foot-version" id="foot-version">v1.0.0</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <button class="icon-btn only-mobile" data-action="open-sidebar" aria-label="打开侧栏">
+            <svg class="icon"><use href="#i-menu" /></svg>
+          </button>
+          <div class="topbar-title" id="chat-title" title="会话标题">新对话</div>
+          <div class="topbar-actions">
+            <button class="model-chip" id="model-chip" data-action="open-settings" title="切换模型">flash</button>
+            <button class="icon-btn" data-action="open-memory" title="记忆库" aria-label="记忆库">
+              <svg class="icon"><use href="#i-brain" /></svg>
+            </button>
+            <button class="icon-btn" data-action="open-settings" title="参数" aria-label="参数">
+              <svg class="icon"><use href="#i-sliders" /></svg>
+            </button>
+            <button class="icon-btn" id="theme-btn" data-action="toggle-theme" title="切换主题" aria-label="切换主题">
+              <svg class="icon"><use href="#i-sun" /></svg>
+            </button>
+            <div class="more-wrap">
+              <button class="icon-btn" data-action="toggle-more" title="更多" aria-label="更多" aria-expanded="false">
+                <svg class="icon"><use href="#i-more" /></svg>
+              </button>
+              <div class="menu" id="more-menu" hidden>
+                <button data-action="export-md"><svg class="icon"><use href="#i-download" /></svg>导出 Markdown</button>
+                <button data-action="export-json"><svg class="icon"><use href="#i-download" /></svg>导出 JSON</button>
+                <button data-action="import"><svg class="icon"><use href="#i-upload" /></svg>导入对话</button>
+                <button data-action="install" id="install-item" hidden><svg class="icon"><use href="#i-download" /></svg>安装到本机</button>
+                <button data-action="about"><svg class="icon"><use href="#i-info" /></svg>关于与快捷键</button>
+                <button data-action="logout" id="logout-item" hidden><svg class="icon"><use href="#i-logout" /></svg>退出登录</button>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div class="notice-bar" id="setup-notice" hidden></div>
+
+        <section class="messages" id="messages" aria-live="polite" aria-label="对话内容"></section>
+        <button class="scroll-bottom" id="scroll-bottom" type="button" data-action="scroll-bottom" hidden>
+          <svg class="icon"><use href="#i-arrow-down" /></svg>
+        </button>
+
+        <footer class="composer-wrap">
+          <div class="usage-bar" id="usage-bar" hidden>
+            <span id="usage-text"></span>
+            <span class="usage-tier" id="usage-tier"></span>
+          </div>
+
+          <form class="composer" id="composer-form" autocomplete="off">
+            <div class="attachments" id="attachments" hidden></div>
+            <div class="composer-row">
+              <button class="icon-btn attach-btn" type="button" data-action="attach" title="添加图片" aria-label="添加图片">
+                <svg class="icon"><use href="#i-clip" /></svg>
+              </button>
+              <textarea id="composer" rows="1" placeholder="给 E-dreikanterbot 发消息…" aria-label="消息输入框"></textarea>
+              <button class="send-btn" id="send-btn" type="submit" title="发送" aria-label="发送">
+                <svg class="icon"><use href="#i-send" /></svg>
+              </button>
+            </div>
+            <div class="composer-meta">
+              <span class="composer-hint" id="composer-hint">Enter 发送 · Shift+Enter 换行</span>
+              <span class="composer-toggles">
+                <button class="mini-toggle" type="button" data-action="toggle-thinking" id="thinking-toggle">思考</button>
+                <button class="mini-toggle" type="button" data-action="toggle-web" id="web-toggle">联网</button>
+              </span>
+            </div>
+          </form>
+
+          <div class="site-foot">
+            <span>© 2026 <span id="site-name">E-dreikanterbot</span></span>
+            <span>·</span>
+            <a id="icp-foot" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">ICP 备案待配置</a>
+            <span id="police-sep" hidden>·</span>
+            <a id="police-foot" hidden target="_blank" rel="noopener"></a>
+          </div>
+        </footer>
+      </main>
+
+      <!-- 参数抽屉 -->
+      <aside class="drawer" id="settings-drawer" hidden aria-label="参数与设置">
+        <div class="drawer-head">
+          <div>
+            <h2>参数与设置</h2>
+            <p>全部直通 DeepSeek 官方参数，改完立即生效</p>
+          </div>
+          <button class="icon-btn" data-action="close-drawer" aria-label="关闭">
+            <svg class="icon"><use href="#i-x" /></svg>
+          </button>
+        </div>
+        <div class="drawer-body">
+          <section class="field-group">
+            <h3>模型</h3>
+            <div class="model-cards" id="model-cards">
+              <label class="model-card">
+                <input type="radio" name="model" value="deepseek-flash" />
+                <span class="model-inner">
+                  <span class="model-name">deepseek-flash</span>
+                  <span class="model-desc">V4.1 Flash · 1M 上下文 · 支持图片</span>
+                  <span class="model-tags"><em>快</em><em>视觉</em></span>
+                </span>
+              </label>
+              <label class="model-card">
+                <input type="radio" name="model" value="deepseek-v4-pro" />
+                <span class="model-inner">
+                  <span class="model-name">deepseek-v4-pro</span>
+                  <span class="model-desc">V4 Pro · 1M 上下文 · 更强推理</span>
+                  <span class="model-tags"><em>强</em><em>贵</em></span>
+                </span>
+              </label>
+            </div>
+          </section>
+
+          <section class="field-group">
+            <div class="switch-row">
+              <div><h3>深度思考</h3><p class="hint">回答前先输出思维链，可用 effort 控制强度</p></div>
+              <button class="switch" id="thinking-switch" type="button" role="switch" aria-checked="true"></button>
+            </div>
+            <div class="segmented" id="effort-seg" role="group" aria-label="思考强度">
+              <button type="button" data-effort="low">low</button>
+              <button type="button" data-effort="high">high</button>
+              <button type="button" data-effort="max">max</button>
+            </div>
+            <p class="hint" id="thinking-hint">思考模式下 temperature / top_p 会被官方忽略，这是预期行为。</p>
+          </section>
+
+          <section class="field-group">
+            <h3>最大输出 tokens</h3>
+            <div class="preset-row" id="token-presets">
+              <button type="button" data-tokens="8192">8K</button>
+              <button type="button" data-tokens="65536">64K</button>
+              <button type="button" data-tokens="131072">128K</button>
+              <button type="button" data-tokens="393216">384K</button>
+            </div>
+            <input class="text-input" id="max-tokens" type="number" min="1" max="393216" step="1" />
+            <p class="hint">官方上限 393216（384K）。实际消耗以 API 返回的 usage 为准。</p>
+          </section>
+
+          <section class="field-group">
+            <div class="range-head"><h3>temperature</h3><span class="range-value" id="temperature-value">1.00</span></div>
+            <input class="range" id="temperature" type="range" min="0" max="2" step="0.05" />
+            <div class="range-head"><h3>top_p</h3><span class="range-value" id="top-p-value">0.95</span></div>
+            <input class="range" id="top-p" type="range" min="0.01" max="1" step="0.01" />
+          </section>
+
+          <section class="field-group">
+            <h3>停止序列</h3>
+            <textarea class="text-input" id="stop-sequences" rows="2" placeholder="每行一个，最多 16 个"></textarea>
+            <p class="hint">官方限制：每个序列 ≤ 512 字节。</p>
+          </section>
+
+          <section class="field-group">
+            <div class="switch-row">
+              <div><h3>JSON 输出</h3><p class="hint">response_format = json_object</p></div>
+              <button class="switch" id="json-switch" type="button" role="switch" aria-checked="false"></button>
+            </div>
+            <div class="switch-row">
+              <div><h3>联网搜索</h3><p class="hint">官方 deepseek_web_search 工具</p></div>
+              <button class="switch" id="web-search-switch" type="button" role="switch" aria-checked="false"></button>
+            </div>
+            <div class="switch-row">
+              <div><h3>读取链接</h3><p class="hint">官方 deepseek_read_url 工具</p></div>
+              <button class="switch" id="read-url-switch" type="button" role="switch" aria-checked="false"></button>
+            </div>
+            <div class="switch-row">
+              <div><h3>长期记忆</h3><p class="hint">注入记忆库，并允许模型调用 remember_fact</p></div>
+              <button class="switch" id="memory-switch" type="button" role="switch" aria-checked="true"></button>
+            </div>
+            <div class="switch-row">
+              <div><h3>自动标题</h3><p class="hint">使用官方 title 扩展为会话命名</p></div>
+              <button class="switch" id="title-switch" type="button" role="switch" aria-checked="true"></button>
+            </div>
+          </section>
+
+          <section class="field-group">
+            <h3>内容安全</h3>
+            <div class="segmented" id="safety-seg" role="group" aria-label="内容安全">
+              <button type="button" data-safety="high">high（公共服务）</button>
+              <button type="button" data-safety="low">low（默认）</button>
+            </div>
+            <p class="hint">面向公众提供服务时，请保持 high 并落实内容审核、生成式 AI 备案与标识义务。</p>
+          </section>
+
+          <section class="field-group">
+            <details class="json-details">
+              <summary>查看本轮请求 JSON</summary>
+              <pre id="request-preview"></pre>
+            </details>
+          </section>
+
+          <div class="drawer-actions">
+            <button class="btn ghost" type="button" id="reset-settings">恢复默认</button>
+            <button class="btn accent" type="button" id="max-settings">参数拉满</button>
+          </div>
+
+          <p class="drawer-note">
+            参数含义与取值范围见 <code>docs/API.md</code>。缓存命中会在下方用量条显示。
+          </p>
+        </div>
+      </aside>
+
+      <!-- 记忆库抽屉 -->
+      <aside class="drawer" id="memory-drawer" hidden aria-label="记忆库">
+        <div class="drawer-head">
+          <div>
+            <h2>记忆库</h2>
+            <p id="memory-stats">0 条记忆</p>
+          </div>
+          <button class="icon-btn" data-action="close-drawer" aria-label="关闭">
+            <svg class="icon"><use href="#i-x" /></svg>
+          </button>
+        </div>
+        <div class="drawer-body">
+          <form class="memory-form" id="memory-form">
+            <textarea class="text-input" id="memory-text" rows="2" maxlength="2000" placeholder="写一条要长期记住的事，例如：我偏好用 TypeScript，回答尽量给可运行的代码"></textarea>
+            <div class="memory-form-row">
+              <input class="text-input" id="memory-tags" type="text" placeholder="标签，逗号分隔（可选）" />
+              <button class="btn accent" type="submit">添加</button>
+            </div>
+          </form>
+          <div class="search memory-search">
+            <svg class="icon"><use href="#i-search" /></svg>
+            <input id="memory-search" type="search" placeholder="检索记忆" autocomplete="off" />
+          </div>
+          <div class="memory-list" id="memory-list"></div>
+          <p class="drawer-note">
+            每轮对话会按相关度挑 <strong>Top-K</strong> 条注入 system 上下文；按写入时间排序，尽量命中 DeepSeek 上下文缓存。
+            模型也可以通过 <code>remember_fact</code> 主动写入。
+          </p>
+        </div>
+      </aside>
+
+      <!-- 登录 -->
+      <div class="login" id="login-view" hidden>
+        <form class="login-card" id="login-form">
+          <div class="brand-mark large" aria-hidden="true">E<span></span></div>
+          <h1>E-dreikanterbot</h1>
+          <p>此实例已启用访问密码</p>
+          <label class="sr-only" for="login-token">访问密码</label>
+          <input class="text-input" id="login-token" type="password" placeholder="输入 ACCESS_TOKEN" autocomplete="current-password" />
+          <button class="btn accent wide" type="submit">
+            <svg class="icon"><use href="#i-key" /></svg> 进入
+          </button>
+          <div class="login-error" id="login-error" hidden></div>
+        </form>
+      </div>
+
+      <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+      <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+      <input type="file" id="import-input" accept="application/json,.json" hidden />
+    </div>
+
+    <script type="module" src="/app.js?v=6"></script>
+  </body>
+</html>
