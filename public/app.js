@@ -108,11 +108,13 @@ const state = {
   filter: '',
   memoryFilter: '',
   draftImages: [],
+  draftFiles: [],
   streaming: false,
   abort: null,
   lastUsage: null,
   drawer: null,
   sendSeq: 0,
+  recognition: null,
   installPrompt: null,
   clientId: (() => {
     let id = localStorage.getItem(STORAGE.client);
@@ -804,10 +806,39 @@ function renderConversations() {
 /* ==========================================================================
    渲染：消息
    ========================================================================== */
-function visibleMessages(messages) {
-  return (messages || [])
+function activePath(doc) {
+  if (!doc) return [];
+  const messages = doc.messages || [];
+  if (doc.rootMessageId === undefined) return messages;
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  const path = [];
+  const seen = new Set();
+  let id = doc.rootMessageId;
+  while (id && byId.has(id) && !seen.has(id)) {
+    seen.add(id);
+    const message = byId.get(id);
+    path.push(message);
+    id = message.selectedChildId ?? null;
+  }
+  return path;
+}
+
+function visibleMessages(doc) {
+  return activePath(doc)
     .filter((msg) => !msg.hidden && (msg.role === 'user' || msg.role === 'assistant'))
     .map((msg) => ({ ...msg }));
+}
+
+function versionsFor(msg) {
+  const all = state.current?.messages || [];
+  const siblings = all
+    .filter((item) => (item.parentId ?? null) === (msg.parentId ?? null) && item.role === msg.role)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return {
+    ids: siblings.map((item) => item.id),
+    index: Math.max(0, siblings.findIndex((item) => item.id === msg.id)),
+    count: siblings.length,
+  };
 }
 
 function renderMessages() {
@@ -826,7 +857,10 @@ function renderMessages() {
   const lastAssistant = [...state.messages].reverse().find((msg) => msg.role === 'assistant');
   const frag = document.createDocumentFragment();
   for (const msg of state.messages) {
-    const el = messageEl(msg, { isLastAssistant: lastAssistant && lastAssistant.id === msg.id });
+    const el = messageEl(msg, {
+      isLastAssistant: lastAssistant && lastAssistant.id === msg.id,
+      versions: versionsFor(msg),
+    });
     if (el) frag.appendChild(el);
   }
   host.appendChild(frag);
@@ -868,7 +902,18 @@ function emptyState() {
   return wrapper;
 }
 
-function messageEl(msg, { isLastAssistant = false } = {}) {
+function branchHtml(versions) {
+  if (!versions || versions.count < 2) return '';
+  return (
+    '<span class="branch-switch">' +
+    `<button type="button" data-action="branch" data-dir="-1" title="上一版本">${icon('arrow-left')}</button>` +
+    `<span class="branch-count">${versions.index + 1}/${versions.count}</span>` +
+    `<button type="button" data-action="branch" data-dir="1" title="下一版本">${icon('arrow-right')}</button>` +
+    '</span>'
+  );
+}
+
+function messageEl(msg, { isLastAssistant = false, versions = null } = {}) {
   const wrap = document.createElement('div');
   wrap.className = `msg ${msg.role}`;
   wrap.dataset.msgId = msg.id;
@@ -876,13 +921,15 @@ function messageEl(msg, { isLastAssistant = false } = {}) {
   if (msg.role === 'user') {
     wrap.innerHTML = `
       <div class="msg-body">
-        <div class="msg-head"><span class="msg-name">你</span><span class="msg-time">${formatTime(msg.createdAt)}</span>
+        <div class="msg-head"><span class="msg-name">你</span><span class="msg-time">${formatTime(msg.createdAt)}</span>${branchHtml(versions)}
           <span class="msg-actions">
             <button data-action="copy-message" data-id="${escapeHtml(msg.id)}" title="复制">${icon('copy')}</button>
+            <button data-action="edit-message" data-id="${escapeHtml(msg.id)}" title="编辑并重新生成">${icon('edit')}</button>
             <button data-action="save-memory" data-id="${escapeHtml(msg.id)}" title="存入记忆库">${icon('brain')}</button>
           </span>
         </div>
         <div class="user-images" hidden></div>
+        <div class="user-files" hidden></div>
         <div class="user-bubble"></div>
       </div>
       <div class="avatar">我</div>`;
@@ -899,6 +946,18 @@ function messageEl(msg, { isLastAssistant = false } = {}) {
         if (img.src) imagesHost.appendChild(img);
       }
     }
+    const filesHost = $('.user-files', wrap);
+    if (msg.files?.length) {
+      filesHost.hidden = false;
+      for (const file of msg.files) {
+        const chip = document.createElement('div');
+        chip.className = 'file-chip';
+        chip.innerHTML = `${icon('file')}<span></span><small>${formatBytes(file.size || file.text?.length || 0)}</small>`;
+        $('span', chip).textContent = file.name;
+        chip.title = file.name;
+        filesHost.appendChild(chip);
+      }
+    }
     return wrap;
   }
 
@@ -908,22 +967,49 @@ function messageEl(msg, { isLastAssistant = false } = {}) {
       <div class="msg-head">
         <span class="msg-name">E-dreikanterbot</span>
         <span class="msg-time">${formatTime(msg.createdAt)}</span>
+        ${branchHtml(versions)}
         <span class="msg-actions">
           <button data-action="copy-message" data-id="${escapeHtml(msg.id)}" title="复制回答">${icon('copy')}</button>
+          <button data-action="read-aloud" data-id="${escapeHtml(msg.id)}" title="朗读">${icon('speaker')}</button>
           <button data-action="save-memory" data-id="${escapeHtml(msg.id)}" title="存入记忆库">${icon('brain')}</button>
           ${isLastAssistant && !msg.streaming ? `<button data-action="regenerate" data-id="${escapeHtml(msg.id)}" title="重新生成">${icon('refresh')}</button>` : ''}
+          ${isLastAssistant && !msg.streaming && (msg.finishReason === 'length' || msg.aborted) ? `<button data-action="continue" data-id="${escapeHtml(msg.id)}" title="继续生成">${icon('arrow-right')}</button>` : ''}
         </span>
       </div>
       <div class="thinking-slot"></div>
       <div class="tool-slot"></div>
       <div class="error-slot"></div>
       <div class="md${msg.streaming ? ' streaming' : ''}"></div>
+      <div class="citations" hidden></div>
       <div class="msg-foot"></div>
     </div>`;
 
   const md = $('.md', wrap);
   if (msg.content) md.innerHTML = renderMarkdown(msg.content);
   else if (msg.streaming) md.innerHTML = '<p class="muted">…</p>';
+
+  const citations = Array.isArray(msg.annotations)
+    ? msg.annotations
+        .filter((item) => item && /^https?:\/\//i.test(String(item.url || '')))
+        .slice(0, 8)
+    : [];
+  if (citations.length) {
+    const host = $('.citations', wrap);
+    host.hidden = false;
+    host.innerHTML = `<span class="citations-label">来源</span>${citations
+      .map((item, index) => {
+        let label = item.title || '';
+        if (!label) {
+          try {
+            label = new URL(item.url).hostname;
+          } catch {
+            label = `来源 ${index + 1}`;
+          }
+        }
+        return `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+      })
+      .join('')}`;
+  }
 
   if (msg.reasoning) {
     $('.thinking-slot', wrap).appendChild(thinkingEl(msg));
@@ -1137,7 +1223,7 @@ function renderComposerState() {
 function renderAttachments() {
   const host = $('#attachments');
   if (!host) return;
-  host.hidden = !state.draftImages.length;
+  host.hidden = !state.draftImages.length && !state.draftFiles.length;
   host.innerHTML = '';
   for (const image of state.draftImages) {
     const item = document.createElement('div');
@@ -1145,22 +1231,68 @@ function renderAttachments() {
     item.innerHTML = `<img alt="待发送图片" src="${image.dataUrl}" /><button type="button" data-action="remove-image" data-img="${image.id}" aria-label="移除">${icon('x')}</button>`;
     host.appendChild(item);
   }
+  for (const file of state.draftFiles) {
+    const item = document.createElement('div');
+    item.className = 'file-chip';
+    item.innerHTML = `${icon('file')}<span></span><small>${formatBytes(file.size)}</small><button type="button" data-action="remove-file" data-file="${file.id}" aria-label="移除">${icon('x')}</button>`;
+    $('span', item).textContent = file.name;
+    $('span', item).title = file.name;
+    host.appendChild(item);
+  }
 }
 
-async function addImageFiles(files) {
-  const list = [...files].filter((file) => file && file.type?.startsWith('image/'));
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)}M`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)}K`;
+  return `${n}B`;
+}
+
+async function addFiles(files, { imagesOnly = false } = {}) {
+  const list = [...files];
   if (!list.length) return;
+  let textTotal = state.draftFiles.reduce((sum, file) => sum + file.text.length, 0);
   for (const file of list) {
-    if (state.draftImages.length >= 4) {
-      toast('最多同时发送 4 张图片', 'error');
+    if (file.type?.startsWith('image/')) {
+      if (state.draftImages.length >= 4) {
+        toast('最多同时发送 4 张图片', 'error');
+        continue;
+      }
+      try {
+        const dataUrl = await prepareImage(file);
+        state.draftImages.push({ id: uid('img'), dataUrl });
+      } catch (err) {
+        toast(err.message || '图片处理失败', 'error');
+      }
+      continue;
+    }
+    if (imagesOnly) continue;
+    const isText =
+      /\.(txt|md|markdown|csv|json|log)$/i.test(file.name) ||
+      file.type === 'text/plain' ||
+      file.type === 'text/markdown' ||
+      file.type === 'application/json' ||
+      file.type === 'text/csv';
+    if (!isText) {
+      toast(`暂不支持 ${file.name}（当前支持图片与 txt/md/csv/json/log）`, 'error');
+      continue;
+    }
+    if (state.draftFiles.length >= 4) {
+      toast('最多同时发送 4 个文本附件', 'error');
       break;
     }
-    try {
-      const dataUrl = await prepareImage(file);
-      state.draftImages.push({ id: uid('img'), dataUrl });
-    } catch (err) {
-      toast(err.message || '图片处理失败', 'error');
+    if (file.size > 400 * 1024) {
+      toast(`${file.name} 超过 400KB`, 'error');
+      continue;
     }
+    const text = await file.text();
+    if (!text.trim()) continue;
+    if (text.length > 200_000 || textTotal + text.length > 500_000) {
+      toast(`文本附件总长度超过限制（500k 字符）`, 'error');
+      break;
+    }
+    textTotal += text.length;
+    state.draftFiles.push({ id: uid('file'), name: file.name, size: text.length, text });
   }
   renderAttachments();
 }
@@ -1271,13 +1403,17 @@ async function streamChat(payload, signal, handlers) {
 /* ==========================================================================
    发送 / 停止 / 重新生成
    ========================================================================== */
-async function sendMessage({ text = null, regenerate = false } = {}) {
+async function sendMessage({ text = null, regenerate = false, editMessageId = null, continuing = false } = {}) {
   if (state.streaming) {
     toast('正在生成，请先停止');
     return;
   }
   if (!state.config?.features?.keyConfigured) {
     toast('服务端未配置任何上游 API Key（DeepSeek / Kimi）', 'error');
+    return;
+  }
+  if ((editMessageId || continuing) && !state.current?.id) {
+    toast('当前没有可操作的对话', 'error');
     return;
   }
   const meta = currentModel();
@@ -1287,8 +1423,16 @@ async function sendMessage({ text = null, regenerate = false } = {}) {
   }
 
   const content = (text ?? $('#composer').value).trim();
-  const images = regenerate ? [] : state.draftImages.map((image) => image.dataUrl);
-  if (!regenerate && !content && !images.length) return;
+  const images = regenerate || continuing ? [] : state.draftImages.map((image) => image.dataUrl);
+  const textFiles =
+    regenerate || continuing
+      ? []
+      : state.draftFiles.map((file) => ({ name: file.name, text: file.text, size: file.text.length }));
+  if (!regenerate && !continuing && !content && !images.length && !textFiles.length) return;
+  if (editMessageId && !content) {
+    toast('编辑后的内容不能为空', 'error');
+    return;
+  }
   if (images.length && meta && !meta.capabilities.vision) {
     toast(`${meta.name} 不支持图片，请切换到视觉模型`, 'error');
     return;
@@ -1298,12 +1442,26 @@ async function sendMessage({ text = null, regenerate = false } = {}) {
     return;
   }
 
-  if (!regenerate) {
+  if (continuing) {
+    // 续写不新增可见用户消息，服务端会插入隐藏续写指令。
+  } else if (editMessageId) {
+    const index = state.messages.findIndex((item) => item.id === editMessageId);
+    if (index >= 0) state.messages = state.messages.slice(0, index);
     state.messages.push({
       id: uid('local'),
       role: 'user',
       content,
       attachments: images.map((dataUrl) => ({ preview: dataUrl })),
+      files: textFiles,
+      createdAt: new Date().toISOString(),
+    });
+  } else if (!regenerate) {
+    state.messages.push({
+      id: uid('local'),
+      role: 'user',
+      content,
+      attachments: images.map((dataUrl) => ({ preview: dataUrl })),
+      files: textFiles,
       createdAt: new Date().toISOString(),
     });
   } else {
@@ -1311,7 +1469,7 @@ async function sendMessage({ text = null, regenerate = false } = {}) {
   }
 
   if (!state.current) state.current = { id: null, title: '', messages: [] };
-  if (!state.current.title || state.current.title === '新对话') {
+  if (!continuing && (!state.current.title || state.current.title === '新对话')) {
     state.current.title = content ? content.slice(0, 24) : '图片对话';
   }
   if ($('#chat-title')) $('#chat-title').textContent = state.current.title;
@@ -1332,10 +1490,13 @@ async function sendMessage({ text = null, regenerate = false } = {}) {
   state.abort = new AbortController();
   state.stickToBottom = true;
 
-  $('#composer').value = '';
-  state.draftImages = [];
-  renderAttachments();
-  autosize();
+  if (!regenerate && !continuing) {
+    $('#composer').value = '';
+    state.draftImages = [];
+    state.draftFiles = [];
+    renderAttachments();
+    autosize();
+  }
   renderMessages();
   renderComposerState();
 
@@ -1359,7 +1520,10 @@ async function sendMessage({ text = null, regenerate = false } = {}) {
         conversationId,
         message: content,
         images,
+        textFiles,
         regenerate,
+        editMessageId: editMessageId || undefined,
+        continue: continuing || undefined,
         clientId: state.clientId,
         settings: settingsPayload(),
       },
@@ -1433,11 +1597,118 @@ async function sendMessage({ text = null, regenerate = false } = {}) {
         if (state.current && !state.current.id) state.current = null;
       }
     }
+    if (seq === state.sendSeq && gotMeta && !assistant.error) {
+      await refreshCurrent();
+    }
   }
 }
 
 function stopStreaming() {
   state.abort?.abort();
+}
+
+async function switchBranch(messageId, direction) {
+  if (!state.current?.id) return;
+  const message = state.messages.find((item) => item.id === messageId);
+  if (!message) return;
+  const versions = versionsFor(message);
+  const targetId = versions.ids[versions.index + direction];
+  if (!targetId) return;
+  try {
+    const data = await api(`/api/conversations/${state.current.id}/select`, {
+      method: 'POST',
+      body: { messageId: targetId },
+    });
+    state.current = data.data;
+    state.messages = visibleMessages(data.data);
+    state.lastUsage = [...state.messages].reverse().find((item) => item.usage)?.usage || state.lastUsage;
+    renderMessages();
+    renderUsage();
+    renderConversations();
+  } catch (err) {
+    toast(err.message || '切换版本失败', 'error');
+  }
+}
+
+function editMessage(id) {
+  const message = findMessage(id);
+  if (!message || message.role !== 'user') return;
+  const box = document.createElement('textarea');
+  box.className = 'edit-box';
+  box.value = message.content || '';
+  const wrap = document.createElement('div');
+  wrap.appendChild(box);
+  setTimeout(() => {
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }, 60);
+  modal({ title: '编辑提问', body: wrap, confirmText: '保存并重新生成', cancelText: '取消' }).then((ok) => {
+    if (!ok) return;
+    const text = box.value.trim();
+    if (!text) {
+      toast('内容不能为空', 'error');
+      return;
+    }
+    sendMessage({ text, editMessageId: message.id });
+  });
+}
+
+function readAloud(text) {
+  if (!('speechSynthesis' in window)) {
+    toast('当前浏览器不支持朗读', 'error');
+    return;
+  }
+  const clean = String(text || '')
+    .replace(/```[\s\S]*?```/g, '（代码块）')
+    .slice(0, 4000);
+  if (!clean.trim()) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(clean);
+  utterance.lang = 'zh-CN';
+  utterance.rate = 1.02;
+  window.speechSynthesis.speak(utterance);
+}
+
+function startVoiceInput() {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    toast('当前浏览器不支持语音识别，请使用 Chrome / Edge', 'error');
+    return;
+  }
+  if (state.recognition) {
+    state.recognition.stop();
+    return;
+  }
+  const recognition = new Recognition();
+  recognition.lang = 'zh-CN';
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  const base = $('#composer').value;
+  const button = $('#voice-btn');
+
+  recognition.onstart = () => button?.classList.add('recording');
+  recognition.onresult = (event) => {
+    let finalText = '';
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const result = event.results[i];
+      if (result.isFinal) finalText += result[0].transcript;
+      else interim += result[0].transcript;
+    }
+    $('#composer').value = `${base ? `${base} ` : ''}${finalText}${interim}`;
+    autosize();
+  };
+  recognition.onerror = (event) => {
+    if (event.error !== 'no-speech' && event.error !== 'aborted') {
+      toast(`语音识别失败：${event.error}`, 'error');
+    }
+  };
+  recognition.onend = () => {
+    state.recognition = null;
+    button?.classList.remove('recording');
+  };
+  state.recognition = recognition;
+  recognition.start();
 }
 
 /* ==========================================================================
@@ -1453,7 +1724,7 @@ async function openConversation(id, silent = false) {
   const data = await api(`/api/conversations/${id}`);
   const doc = data.data;
   state.current = doc;
-  state.messages = visibleMessages(doc.messages);
+  state.messages = visibleMessages(doc);
   state.lastUsage = [...state.messages].reverse().find((msg) => msg.usage)?.usage || null;
   localStorage.setItem(STORAGE.lastConv, id);
   if ($('#chat-title')) $('#chat-title').textContent = doc.title || '新对话';
@@ -1462,6 +1733,24 @@ async function openConversation(id, silent = false) {
   renderConversations();
   if (!silent) closeAllPanels();
   scrollToBottom(true);
+}
+
+/** 流式结束后刷新服务端会话，拿到分支/兄弟版本与最终消息 id。 */
+async function refreshCurrent() {
+  const id = state.current?.id;
+  if (!id) return;
+  try {
+    const data = await api(`/api/conversations/${id}`);
+    if (state.current?.id !== id) return;
+    state.current = data.data;
+    state.messages = visibleMessages(data.data);
+    state.lastUsage = [...state.messages].reverse().find((msg) => msg.usage)?.usage || state.lastUsage;
+    renderMessages();
+    renderUsage();
+    renderConversations();
+  } catch {
+    /* 保留本地消息 */
+  }
 }
 
 function newChat() {
@@ -1475,6 +1764,7 @@ function newChat() {
   state.messages = [];
   state.lastUsage = null;
   state.draftImages = [];
+  state.draftFiles = [];
   localStorage.removeItem(STORAGE.lastConv);
   $('#chat-title').textContent = '新对话';
   $('#composer').value = '';
@@ -1595,6 +1885,100 @@ async function addMemory(text, tags) {
   const result = await api('/api/memory', { method: 'POST', body: { text, tags } });
   await loadMemory();
   toast(result.duplicate ? '记忆库中已有相同内容' : '已加入记忆库', result.duplicate ? '' : 'ok');
+}
+
+function openReadUrl() {
+  const input = document.createElement('input');
+  input.className = 'text-input';
+  input.type = 'url';
+  input.placeholder = 'https://example.com/article';
+  const wrap = document.createElement('div');
+  wrap.appendChild(input);
+  setTimeout(() => input.focus(), 60);
+  modal({ title: '读取网页', body: wrap, confirmText: '读取并加入附件' }).then(async (ok) => {
+    if (!ok) return;
+    const target = input.value.trim();
+    if (!target) return;
+    if (state.draftFiles.length >= 4) {
+      toast('附件已达上限（4 个）', 'error');
+      return;
+    }
+    toast('正在读取网页…');
+    try {
+      const result = await api('/api/read-url', { method: 'POST', body: { url: target } });
+      const data = result.data;
+      state.draftFiles.push({
+        id: uid('file'),
+        name: `${data.title || '网页'}.txt`,
+        size: data.text.length,
+        text: `来源：${data.url}\n标题：${data.title}\n\n${data.text}`,
+      });
+      renderAttachments();
+      toast(`已读取 ${data.chars} 字符，作为附件发送`, 'ok');
+    } catch (err) {
+      toast(err.message || '读取网页失败', 'error');
+    }
+  });
+}
+
+function rememberConversation() {
+  if (!state.current?.id) {
+    toast('当前没有对话', 'error');
+    return;
+  }
+  const users = state.messages
+    .filter((message) => message.role === 'user' && message.content)
+    .slice(-6)
+    .map((message) => `- ${message.content}`)
+    .join('\n');
+  const assistant = [...state.messages].reverse().find((message) => message.role === 'assistant' && message.content);
+  const box = document.createElement('textarea');
+  box.className = 'edit-box';
+  box.value = [
+    `对话主题：${state.current.title || '未命名'}`,
+    users ? `用户提到：\n${users}` : '',
+    assistant ? `结论摘要：\n${String(assistant.content).slice(0, 600)}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, 1900);
+  const wrap = document.createElement('div');
+  wrap.appendChild(box);
+  setTimeout(() => box.focus(), 60);
+  modal({ title: '记住这段对话', body: wrap, confirmText: '写入记忆库' }).then(async (ok) => {
+    if (!ok) return;
+    const text = box.value.trim();
+    if (!text) return;
+    try {
+      await addMemory(text, ['对话摘要']);
+    } catch (err) {
+      toast(err.message || '写入失败', 'error');
+    }
+  });
+}
+
+function exportMemory() {
+  const link = document.createElement('a');
+  link.href = '/api/memory/export';
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  toast('正在导出记忆库');
+}
+
+async function importMemory(file) {
+  const text = await file.text();
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    toast('记忆文件不是合法 JSON', 'error');
+    return;
+  }
+  const result = await api('/api/memory/import', { method: 'POST', body: payload });
+  await loadMemory();
+  toast(`已导入 ${result.added} 条记忆`, 'ok');
 }
 
 /* ==========================================================================
@@ -1889,7 +2273,7 @@ function bindEvents() {
       .filter(Boolean);
     if (files.length) {
       event.preventDefault();
-      addImageFiles(files);
+      addFiles(files, { imagesOnly: true });
     }
   });
 
@@ -1899,11 +2283,11 @@ function bindEvents() {
   });
   composerForm?.addEventListener('drop', (event) => {
     event.preventDefault();
-    if (event.dataTransfer?.files?.length) addImageFiles(event.dataTransfer.files);
+    if (event.dataTransfer?.files?.length) addFiles(event.dataTransfer.files);
   });
 
   $('#file-input')?.addEventListener('change', (event) => {
-    addImageFiles(event.target.files);
+    addFiles(event.target.files);
     event.target.value = '';
   });
 
@@ -1915,6 +2299,18 @@ function bindEvents() {
         await importConversations(file);
       } catch (err) {
         toast(err.message || '导入失败', 'error');
+      }
+    }
+  });
+
+  $('#memory-import-input')?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) {
+      try {
+        await importMemory(file);
+      } catch (err) {
+        toast(err.message || '导入记忆失败', 'error');
       }
     }
   });
@@ -2092,7 +2488,11 @@ function onDocumentClick(event) {
       },
       'export-md': () => exportConversation('md'),
       'export-json': () => exportConversation('json'),
+      'export-memory': () => exportMemory(),
       import: () => $('#import-input')?.click(),
+      'import-memory': () => $('#memory-import-input')?.click(),
+      'remember-conversation': () => rememberConversation(),
+      'read-url': () => openReadUrl(),
       about: () => openAbout(),
       install: async () => {
         if (!state.installPrompt) return;
@@ -2134,8 +2534,20 @@ function onDocumentClick(event) {
         }
       },
       regenerate: () => sendMessage({ regenerate: true }),
+      continue: () => sendMessage({ continuing: true }),
+      branch: () => switchBranch(actionEl.closest('.msg')?.dataset.msgId, Number(actionEl.dataset.dir || 0)),
+      'edit-message': () => editMessage(actionEl.dataset.id),
+      'read-aloud': () => {
+        const message = findMessage(actionEl.dataset.id);
+        readAloud(message?.content || '');
+      },
+      voice: () => startVoiceInput(),
       'remove-image': () => {
         state.draftImages = state.draftImages.filter((image) => image.id !== actionEl.dataset.img);
+        renderAttachments();
+      },
+      'remove-file': () => {
+        state.draftFiles = state.draftFiles.filter((file) => file.id !== actionEl.dataset.file);
         renderAttachments();
       },
     };

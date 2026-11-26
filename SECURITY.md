@@ -37,6 +37,7 @@
 | 请求体 | 默认 48MB 上限（与官方一致），超限直接断开 |
 | 图片 | 只接受 data URL；文件头魔数校验；单张 ≤ 8MB；最多 4 张 |
 | 路径穿越 | 静态与附件均做 `path.resolve` 前缀校验 / 文件名白名单 |
+| SSRF | `/api/read-url` 只允许 http/https；拒绝 localhost、内网 IP、`.local`；DNS 解析后再校验；手动处理重定向；限制 2MB |
 | XSS | 前端先转义再渲染 Markdown；链接协议白名单；不使用 `innerHTML` 插入模型原文 |
 | 点击劫持 | 生产 `X-Frame-Options: DENY` + `frame-ancestors 'none'` |
 | CSP | `default-src 'self'`，无外部 CDN，`object-src 'none'` |

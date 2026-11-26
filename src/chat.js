@@ -243,11 +243,14 @@ export class ChatService {
     const requestId = newId('req');
     const meta = settings.modelMeta;
     const canUseMemoryTools = this.cfg.memory.enabled && settings.memory;
-    const toolsEnabled = canUseMemoryTools && (settings.provider === 'kimi' || canPassTools(conversation));
+    const path = this.conversations.visiblePath(conversation);
+    const toolsEnabled =
+      canUseMemoryTools && (settings.provider === 'kimi' || canPassTools({ messages: path }));
     const includeReasoning = settings.provider === 'kimi' ? true : toolsEnabled;
 
-    const lastUser = [...conversation.messages].reverse().find((m) => m.role === 'user');
-    const query = typeof lastUser?.content === 'string' ? lastUser.content : '';
+    const lastUser = [...path].reverse().find((m) => m.role === 'user');
+    const lastVisibleUser = [...path].reverse().find((m) => m.role === 'user' && !m.hidden) || lastUser;
+    const query = typeof lastVisibleUser?.content === 'string' ? lastVisibleUser.content : '';
 
     let memoryBlock = '';
     let memoryFacts = [];
@@ -264,7 +267,7 @@ export class ChatService {
 
     const built = await buildApiMessages({
       cfg: this.cfg,
-      conversation,
+      conversation: { ...conversation, messages: path },
       memoryBlock,
       includeTools: toolsEnabled,
       includeReasoning,
@@ -430,6 +433,7 @@ export class ChatService {
       reasoning: allReasoning,
       thinking: settings.thinking,
       provider: settings.provider,
+      finishReason,
       aborted,
       usage: usageRecord,
       model: settings.model,
@@ -557,6 +561,7 @@ export class ChatService {
       usage: data.usage,
       model: data.model,
       aborted: Boolean(data.aborted),
+      finishReason: data.finishReason || undefined,
       error: data.error || undefined,
       serverToolCalls: data.serverToolCalls?.length ? data.serverToolCalls : undefined,
       annotations: data.annotations?.length ? data.annotations : undefined,

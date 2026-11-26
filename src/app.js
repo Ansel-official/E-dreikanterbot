@@ -9,6 +9,7 @@ import { readAsDataUrl, saveDataUrl, serveAttachment } from './files.js';
 import { PRICING_SOURCE, isPeak } from './pricing.js';
 import { ModelRegistry } from './providers.js';
 import { serveStatic } from './static.js';
+import { readUrl } from './webread.js';
 import { ConversationStore, MemoryStore } from './store.js';
 import {
   VERSION,
@@ -297,6 +298,16 @@ async function handleApi(req, res, url, ctx) {
     }
   }
 
+  const selectMatch = pathname.match(/^\/api\/conversations\/([A-Za-z0-9_-]+)\/select$/);
+  if (selectMatch && req.method === 'POST') {
+    const id = selectMatch[1];
+    if (!ctx.conversations.get(id)) return fail(res, 404, 'not_found', '对话不存在。');
+    const body = await readJson(req, 1024 * 1024);
+    const doc = await ctx.conversations.selectVersion(id, String(body.messageId || ''));
+    if (!doc) return fail(res, 404, 'not_found', '消息版本不存在。');
+    return json(res, 200, { data: doc });
+  }
+
   const exportMatch = pathname.match(/^\/api\/conversations\/([A-Za-z0-9_-]+)\/export$/);
   if (exportMatch && req.method === 'GET') {
     const id = exportMatch[1];
@@ -314,6 +325,30 @@ async function handleApi(req, res, url, ctx) {
   if (pathname === '/api/memory' && req.method === 'GET') {
     const query = url.searchParams.get('q') || '';
     return json(res, 200, { data: ctx.memory.list({ query }), stats: ctx.memory.stats() });
+  }
+
+  if (pathname === '/api/memory/export' && req.method === 'GET') {
+    const payload = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), facts: ctx.memory.facts }, null, 2);
+    return sendDownload(res, `e-dreikanterbot-memory-${new Date().toISOString().slice(0, 10)}.json`, 'application/json; charset=utf-8', payload);
+  }
+
+  if (pathname === '/api/memory/import' && req.method === 'POST') {
+    const body = await readJson(req, 8 * 1024 * 1024);
+    const facts = Array.isArray(body) ? body : body?.facts;
+    if (!Array.isArray(facts)) return fail(res, 400, 'invalid_import', '导入文件需要包含 facts 数组');
+    let added = 0;
+    for (const fact of facts.slice(0, 5000)) {
+      if (!fact || typeof fact.text !== 'string' || !fact.text.trim()) continue;
+      const result = ctx.memory.add({
+        text: fact.text,
+        tags: Array.isArray(fact.tags) ? fact.tags : [],
+        source: fact.source || 'import',
+        pinned: Boolean(fact.pinned),
+      });
+      if (!result.duplicate) added += 1;
+    }
+    await ctx.memory.flush();
+    return json(res, 200, { ok: true, added, stats: ctx.memory.stats() });
   }
 
   if (pathname === '/api/memory' && req.method === 'POST') {
@@ -349,6 +384,16 @@ async function handleApi(req, res, url, ctx) {
   const fileMatch = pathname.match(/^\/api\/files\/([A-Za-z0-9_.-]+)$/);
   if (fileMatch && (req.method === 'GET' || req.method === 'HEAD')) {
     return serveAttachment(req, res, cfg.filesDir, fileMatch[1]);
+  }
+
+  if (pathname === '/api/read-url' && req.method === 'POST') {
+    const body = await readJson(req, 1024 * 1024);
+    try {
+      const data = await readUrl(body.url);
+      return json(res, 200, { data });
+    } catch (err) {
+      return fail(res, err.status || 502, 'read_url_failed', err.message || '读取网页失败');
+    }
   }
 
   if (pathname === '/api/chat' && req.method === 'POST') {
@@ -388,6 +433,7 @@ async function handleChat(req, res, ctx) {
     );
   }
   const images = Array.isArray(body.images) ? body.images.filter(Boolean).slice(0, 4) : [];
+  const textFiles = normalizeTextFiles(body.textFiles);
   if (images.length && !settings.modelMeta.capabilities.vision) {
     return fail(
       res,
@@ -398,6 +444,8 @@ async function handleChat(req, res, ctx) {
     );
   }
   const regenerate = Boolean(body.regenerate);
+  const continuing = Boolean(body.continue);
+  const editMessageId = body.editMessageId ? String(body.editMessageId) : null;
 
   let conversation = null;
   let created = false;
@@ -410,8 +458,31 @@ async function handleChat(req, res, ctx) {
   let attachments = [];
   if (regenerate) {
     if (!conversation) return fail(res, 400, 'invalid_request', '重新生成需要提供 conversationId。');
-    const removed = await conversations.popTrailingAssistant(conversation.id);
-    if (!removed) return fail(res, 400, 'nothing_to_regenerate', '没有可重新生成的回答。');
+    const path = conversations.visiblePath(conversation);
+    const lastUser = [...path].reverse().find((m) => m.role === 'user');
+    const last = path[path.length - 1];
+    if (!lastUser || last?.role !== 'assistant') {
+      return fail(res, 400, 'nothing_to_regenerate', '没有可重新生成的回答。');
+    }
+    // 保留旧回答作为兄弟分支，新建助手分支。
+    await conversations.clearSelectedChild(conversation.id, lastUser.id);
+  } else if (continuing) {
+    if (!conversation) return fail(res, 400, 'invalid_request', '继续生成需要提供 conversationId。');
+    const path = conversations.visiblePath(conversation);
+    const last = path[path.length - 1];
+    if (!last || last.role !== 'assistant') {
+      return fail(res, 400, 'nothing_to_continue', '当前没有可续写的回答。');
+    }
+    await conversations.append(
+      conversation.id,
+      {
+        role: 'user',
+        content: '（系统续写指令）请从上次中断处继续，直接续写正文，不要重复已经输出的内容，也不要重新开头。',
+        hidden: true,
+        internal: true,
+      },
+      { parentId: last.id },
+    );
   } else {
     message = String(body.message ?? '').trim();
     if (!message && !images.length) return fail(res, 400, 'empty_message', '消息不能为空。');
@@ -425,6 +496,12 @@ async function handleChat(req, res, ctx) {
       created = true;
     }
 
+    let editTarget = null;
+    if (editMessageId) {
+      editTarget = conversation.messages.find((item) => item.id === editMessageId && item.role === 'user');
+      if (!editTarget) return fail(res, 400, 'invalid_edit', '要编辑的用户消息不存在。');
+    }
+
     try {
       for (const dataUrl of images) {
         attachments.push(await saveDataUrl(dataUrl, cfg.filesDir, { maxBytes: 8 * 1024 * 1024 }));
@@ -434,12 +511,17 @@ async function handleChat(req, res, ctx) {
       throw err;
     }
 
-    await conversations.append(conversation.id, {
-      role: 'user',
-      content: message,
-      attachments: attachments.length ? attachments : undefined,
-      clientId: typeof body.clientId === 'string' ? body.clientId.slice(0, 64) : undefined,
-    });
+    await conversations.append(
+      conversation.id,
+      {
+        role: 'user',
+        content: message,
+        attachments: attachments.length ? attachments : undefined,
+        files: textFiles.length ? textFiles : undefined,
+        clientId: typeof body.clientId === 'string' ? body.clientId.slice(0, 64) : undefined,
+      },
+      editTarget ? { parentId: editTarget.parentId ?? null } : {},
+    );
   }
 
   res.writeHead(200, sseHeaders());
@@ -794,6 +876,31 @@ function safeName(value) {
   return String(value || 'conversation')
     .replace(/[\\/:*?"<>|\r\n]+/g, '_')
     .slice(0, 60) || 'conversation';
+}
+
+/** 文本附件：最多 4 个，单个 200k 字符，总计 500k 字符。 */
+function normalizeTextFiles(raw) {
+  if (!Array.isArray(raw) || !raw.length) return [];
+  const files = [];
+  let total = 0;
+  for (const item of raw.slice(0, 4)) {
+    if (!item || typeof item.text !== 'string') continue;
+    const text = item.text;
+    if (!text.trim()) continue;
+    if (text.length > 200_000) {
+      const error = new Error(`附件 ${item.name || ''} 超过 20 万字符`);
+      error.status = 413;
+      throw error;
+    }
+    total += text.length;
+    if (total > 500_000) {
+      const error = new Error('文本附件总长度超过 50 万字符');
+      error.status = 413;
+      throw error;
+    }
+    files.push({ name: String(item.name || 'attachment').slice(0, 80), text, size: text.length });
+  }
+  return files;
 }
 
 export { RateLimiter, catalogModels };

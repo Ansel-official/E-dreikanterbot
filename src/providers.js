@@ -175,22 +175,46 @@ function genericModel(providerId, item) {
 
 function mergeDynamic(def, item, preset) {
   const base = preset ? cloneModel(preset) : genericModel(def.id, item);
-  const efforts = item?.effort?.supported_levels;
+  const efforts = item?.effort?.supported_levels || item?.reasoning_efforts?.valid_efforts;
+  const modalities = item?.input_modalities || item?.modalities?.input;
+  const imageIn = item?.supports_image_in;
+  const videoIn = item?.supports_video_in;
+  const contextWindow = Number(item?.context_window || item?.context_length) || base.contextWindow;
+  const maxOutput = Number(item?.max_output_tokens) || base.maxOutput;
+  const thinkingMode =
+    item?.supports_thinking_type === 'only'
+      ? 'always'
+      : item?.supports_thinking_type === 'optional'
+        ? 'optional'
+        : base.thinking.mode;
+
+  const inputModalities = Array.isArray(modalities) && modalities.length ? [...modalities] : [...base.inputModalities];
+  if (imageIn && !inputModalities.includes('image')) inputModalities.push('image');
+  if (videoIn && !inputModalities.includes('video')) inputModalities.push('video');
+  if (!imageIn && imageIn !== undefined) {
+    const idx = inputModalities.indexOf('image');
+    if (idx >= 0) inputModalities.splice(idx, 1);
+  }
+
   return {
     ...base,
     name: item?.name || base.name,
-    contextWindow: Number(item?.context_window) || base.contextWindow,
-    maxOutput: Number(item?.max_output_tokens) || base.maxOutput,
-    inputModalities:
-      Array.isArray(item?.input_modalities) && item.input_modalities.length
-        ? [...item.input_modalities]
-        : base.inputModalities,
+    contextWindow,
+    maxOutput,
+    inputModalities,
     thinking: {
       ...base.thinking,
+      mode: thinkingMode,
       ...(Array.isArray(efforts) && efforts.length
         ? { efforts: efforts.filter((level) => ['low', 'high', 'max'].includes(level)) }
         : {}),
-      ...(item?.effort?.default_level ? { defaultEffort: item.effort.default_level } : {}),
+      ...(item?.effort?.default_level || item?.reasoning_efforts?.default_effort
+        ? { defaultEffort: item.effort?.default_level || item.reasoning_efforts?.default_effort }
+        : {}),
+    },
+    capabilities: {
+      ...base.capabilities,
+      vision: inputModalities.includes('image'),
     },
   };
 }

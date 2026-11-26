@@ -145,7 +145,7 @@ export default function register() {
     assert(detail.json.data.messages[2].hidden, 'tool 消息应隐藏');
   });
 
-  test('重新生成：不重复写入用户消息', async () => {
+  test('重新生成：保留旧回答为兄弟分支并可切换', async () => {
     const { base, cookie, mock } = getContext();
     mock.reset();
     const first = await fetch(`${base}/api/chat`, {
@@ -167,9 +167,32 @@ export default function register() {
     equal(eventData(events, 'done')[0].aborted, false);
 
     const detail = await request(base, `/api/conversations/${conversationId}`, { cookie });
-    equal(detail.json.data.messages.length, 2, '重新生成后消息数不变');
-    equal(detail.json.data.messages[0].role, 'user');
-    equal(detail.json.data.messages[1].role, 'assistant');
+    const doc = detail.json.data;
+    equal(doc.messages.length, 3, '旧回答保留，新增兄弟回答');
+    equal(doc.messages[0].role, 'user');
+
+    const byId = new Map(doc.messages.map((message) => [message.id, message]));
+    const path = [];
+    let cursor = doc.rootMessageId;
+    while (cursor) {
+      const message = byId.get(cursor);
+      if (!message) break;
+      path.push(message);
+      cursor = message.selectedChildId;
+    }
+    equal(path.length, 2, '可见路径仍是一条用户 + 一条回答');
+    equal(path[0].role, 'user');
+    equal(path[1].role, 'assistant');
+
+    const oldAssistant = doc.messages.find((message) => message.role === 'assistant' && message.id !== path[1].id);
+    assert(oldAssistant, '应能找到旧回答');
+    const selected = await request(base, `/api/conversations/${conversationId}/select`, {
+      method: 'POST',
+      cookie,
+      body: { messageId: oldAssistant.id },
+    });
+    equal(selected.status, 200);
+    equal(selected.json.data.messages[0].selectedChildId, oldAssistant.id, '切换后父节点应选中旧回答');
   });
 
   test('图片输入：保存附件、上游收到 image_url、可回读', async () => {
@@ -340,6 +363,112 @@ export default function register() {
     equal(usage.cache_write_tokens, 10);
     equal(usage.cost, null);
     equal(usage.currency, 'CNY');
+  });
+
+  test('编辑提问：创建新用户分支并重新生成', async () => {
+    const { base, cookie, mock } = getContext();
+    mock.reset();
+    const first = await fetch(`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, 'x-requested-with': 'E-dreikanterbot' },
+      body: JSON.stringify({ message: '原始问题' }),
+    });
+    const events = await collectSSE(first);
+    const conversationId = eventData(events, 'meta')[0].conversationId;
+    const before = await request(base, `/api/conversations/${conversationId}`, { cookie });
+    const userMessage = before.json.data.messages.find((message) => message.role === 'user');
+
+    const edited = await fetch(`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, 'x-requested-with': 'E-dreikanterbot' },
+      body: JSON.stringify({ conversationId, editMessageId: userMessage.id, message: '修改后的问题' }),
+    });
+    equal(edited.status, 200);
+    await collectSSE(edited);
+
+    const detail = await request(base, `/api/conversations/${conversationId}`, { cookie });
+    const doc = detail.json.data;
+    equal(doc.messages.length, 4, '旧分支保留，新增用户与助手');
+    const users = doc.messages.filter((message) => message.role === 'user');
+    equal(users.length, 2);
+    assert(users.some((message) => message.content === '修改后的问题'));
+    equal(doc.rootMessageId, users.find((message) => message.content === '修改后的问题').id);
+  });
+
+  test('继续生成：插入隐藏续写指令并追加回答', async () => {
+    const { base, cookie, mock } = getContext();
+    mock.reset();
+    const first = await fetch(`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, 'x-requested-with': 'E-dreikanterbot' },
+      body: JSON.stringify({ message: '继续测试' }),
+    });
+    const events = await collectSSE(first);
+    const conversationId = eventData(events, 'meta')[0].conversationId;
+    const before = await request(base, `/api/conversations/${conversationId}`, { cookie });
+
+    const continued = await fetch(`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, 'x-requested-with': 'E-dreikanterbot' },
+      body: JSON.stringify({ conversationId, continue: true }),
+    });
+    equal(continued.status, 200);
+    await collectSSE(continued);
+
+    const after = await request(base, `/api/conversations/${conversationId}`, { cookie });
+    equal(after.json.data.messages.length, before.json.data.messages.length + 2);
+    assert(after.json.data.messages.some((message) => message.hidden && message.role === 'user'));
+  });
+
+  test('文本附件：内容注入上游并持久化', async () => {
+    const { base, cookie, mock } = getContext();
+    mock.reset();
+    const res = await fetch(`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, 'x-requested-with': 'E-dreikanterbot' },
+      body: JSON.stringify({
+        message: '总结附件',
+        textFiles: [{ name: 'notes.md', text: '# 项目笔记\n记住这个暗号：蓝色松鼠。' }],
+      }),
+    });
+    equal(res.status, 200);
+    await collectSSE(res);
+    const upstream = mock.state.requests.at(-1);
+    const lastUser = [...upstream.messages].reverse().find((message) => message.role === 'user');
+    includes(lastUser.content, '<file name="notes.md">');
+    includes(lastUser.content, '蓝色松鼠');
+
+    const list = await request(base, '/api/conversations', { cookie });
+    const doc = await request(base, `/api/conversations/${list.json.data[0].id}`, { cookie });
+    const user = doc.json.data.messages.find((message) => message.role === 'user');
+    equal(user.files[0].name, 'notes.md');
+  });
+
+  test('网页读取：拒绝内网地址', async () => {
+    const { base, cookie } = getContext();
+    const res = await request(base, '/api/read-url', {
+      method: 'POST',
+      cookie,
+      body: { url: 'http://127.0.0.1:8788/api/health' },
+    });
+    equal(res.status, 403);
+    includes(res.json.error.message, '内网');
+  });
+
+  test('记忆库导入导出', async () => {
+    const { base, cookie } = getContext();
+    const exported = await fetch(`${base}/api/memory/export`, { headers: { cookie } });
+    equal(exported.status, 200);
+    const payload = await exported.json();
+    assert(Array.isArray(payload.facts));
+
+    const imported = await request(base, '/api/memory/import', {
+      method: 'POST',
+      cookie,
+      body: { facts: [{ text: '导入的记忆：用户喜欢蓝色', tags: ['导入'] }] },
+    });
+    equal(imported.status, 200);
+    assert(imported.json.added >= 1);
   });
 
   test('视觉能力按模型校验：文本模型拒绝图片', async () => {

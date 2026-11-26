@@ -157,17 +157,29 @@ curl -N http://localhost:8788/api/chat \
   -d '{"message":"你好","settings":{"thinking":true,"reasoning_effort":"max","max_tokens":4096}}'
 ```
 
+V2.1.R 的额外字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `editMessageId` | 在指定用户消息的同一父节点下创建新分支，旧分支保留 |
+| `regenerate: true` | 保留旧回答，在同一用户消息下新建助手兄弟分支 |
+| `continue: true` | 插入隐藏续写指令，用于 `finish_reason=length` 或手动停止后续写 |
+| `textFiles` | `[{name, text}]`，最多 4 个，单文件 20 万字符、合计 50 万字符 |
+
+消息树字段：每条消息含 `parentId`、`selectedChildId`；会话含 `rootMessageId`。UI 从根沿 `selectedChildId` 取当前路径，切换版本就是改父节点的 `selectedChildId`。隐藏消息（`hidden: true`）用于工具轮次与续写指令，不展示但参与上下文。
+
 ### 2.2 会话
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/conversations` | 会话列表（标题、预览、更新时间、用量） |
 | POST | `/api/conversations` | 新建空会话 |
-| GET | `/api/conversations/:id` | 完整会话（含隐藏的工具消息） |
+| GET | `/api/conversations/:id` | 完整会话（含所有分支与隐藏工具消息） |
 | PATCH | `/api/conversations/:id` | 重命名 `{title}` |
 | DELETE | `/api/conversations/:id` | 删除会话与附件 |
-| GET | `/api/conversations/:id/export?format=md\|json` | 导出 |
+| GET | `/api/conversations/:id/export?format=md\|json` | 导出当前分支 |
 | POST | `/api/conversations/import` | 导入 `{conversations:[...]}` |
+| POST | `/api/conversations/:id/select` | 切换分支 `{messageId}` |
 
 ### 2.3 记忆库
 
@@ -177,8 +189,16 @@ curl -N http://localhost:8788/api/chat \
 | POST | `/api/memory` | 新增 `{text, tags, pinned}` |
 | PATCH | `/api/memory/:id` | 修改 / 置顶 |
 | DELETE | `/api/memory/:id` | 删除 |
+| GET | `/api/memory/export` | 导出全部记忆（JSON 下载） |
+| POST | `/api/memory/import` | 导入 `{facts:[...]}`，按文本去重 |
 
-### 2.4 其他
+### 2.4 网页读取
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/read-url` | `{url}`，抓取公开网页正文；拒绝内网/本机地址，限制 2MB |
+
+### 2.5 其他
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -233,7 +253,7 @@ frequency_penalty, presence_penalty
 ### 3.3 `GET /v1/health`
 
 ```json
-{ "ok": true, "version": "1.1.0", "models": ["deepseek-flash", "deepseek-v4-pro", "kimi-k3.1-pro"] }
+{ "ok": true, "version": "2.1.0-R", "models": ["deepseek-flash", "deepseek-v4-pro", "kimi-k3.1-pro"] }
 ```
 
 ---

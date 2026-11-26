@@ -35,19 +35,58 @@ export class ConversationStore {
   }
 
   meta(doc) {
-    const last = doc.messages[doc.messages.length - 1];
-    const lastUser = [...doc.messages].reverse().find((m) => m.role === 'user');
+    const path = this.visiblePath(doc).filter((message) => !message.hidden);
+    const last = path[path.length - 1];
+    const lastUser = [...path].reverse().find((m) => m.role === 'user');
     return {
       id: doc.id,
       title: doc.title || '新对话',
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt || doc.createdAt,
       model: doc.model || '',
-      messageCount: doc.messages.length,
+      messageCount: path.length,
+      totalMessages: doc.messages.length,
       preview: oneLine(lastUser?.content || last?.content || '', 60),
       titleLocked: Boolean(doc.titleLocked),
       usage: doc.totalUsage || null,
     };
+  }
+
+  /** 旧数据没有 rootMessageId：按原顺序补全 parentId/selectedChildId（仅内存，下一次写入时落盘）。 */
+  _normalize(doc) {
+    if (doc.rootMessageId !== undefined) return doc;
+    doc.rootMessageId = doc.messages[0]?.id ?? null;
+    doc.messages.forEach((message, index) => {
+      if (message.parentId === undefined) message.parentId = doc.messages[index - 1]?.id ?? null;
+      if (message.selectedChildId === undefined) message.selectedChildId = doc.messages[index + 1]?.id;
+    });
+    return doc;
+  }
+
+  /**
+   * 当前选中分支的完整路径（含隐藏的工具消息）。
+   * 旧会话没有分支字段时按原顺序返回。
+   */
+  visiblePath(doc) {
+    if (!doc) return [];
+    if (doc.rootMessageId === undefined) return [...doc.messages];
+    const byId = new Map(doc.messages.map((message) => [message.id, message]));
+    const path = [];
+    const seen = new Set();
+    let id = doc.rootMessageId;
+    while (id && byId.has(id) && !seen.has(id)) {
+      seen.add(id);
+      const message = byId.get(id);
+      path.push(message);
+      id = message.selectedChildId ?? null;
+    }
+    return path;
+  }
+
+  /** 给 UI 使用的可见路径（过滤隐藏工具消息）。 */
+  visibleMessages(doc, { includeHidden = false } = {}) {
+    const path = this.visiblePath(doc);
+    return includeHidden ? path : path.filter((message) => !message.hidden);
   }
 
   list() {
@@ -69,6 +108,7 @@ export class ConversationStore {
       createdAt: now,
       updatedAt: now,
       titleLocked: false,
+      rootMessageId: null,
       messages: [],
       totalUsage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cached_tokens: 0, cost: 0 },
     };
@@ -77,19 +117,72 @@ export class ConversationStore {
     return doc;
   }
 
-  async append(id, message) {
+  /**
+   * 追加消息。默认挂在当前可见路径末尾；传 parentId 可创建分支。
+   * 新消息会成为父节点当前选中的子节点。
+   */
+  async append(id, message, { parentId } = {}) {
     const doc = this.get(id);
     if (!doc) return null;
+    this._normalize(doc);
+    const path = this.visiblePath(doc);
+    const parent = parentId === undefined ? path[path.length - 1]?.id ?? null : parentId;
     const msg = {
       id: newId('m'),
       createdAt: new Date().toISOString(),
       ...message,
+      parentId: parent,
     };
     doc.messages.push(msg);
+    if (parent === null) {
+      doc.rootMessageId = msg.id;
+    } else {
+      const parentMessage = doc.messages.find((item) => item.id === parent);
+      if (parentMessage) parentMessage.selectedChildId = msg.id;
+    }
     doc.updatedAt = msg.createdAt;
     if (message.usage) this._accumulateUsage(doc, message.usage);
     await this._persist(doc);
     return msg;
+  }
+
+  /** 重新生成前：把父节点当前选中的子分支取消，下一次 append 会成为新的兄弟版本。 */
+  async clearSelectedChild(id, messageId) {
+    const doc = this.get(id);
+    if (!doc) return false;
+    this._normalize(doc);
+    const message = doc.messages.find((item) => item.id === messageId);
+    if (!message) return false;
+    message.selectedChildId = undefined;
+    doc.updatedAt = new Date().toISOString();
+    await this._persist(doc);
+    return true;
+  }
+
+  /** 切换消息版本：选择 messageId 作为其父节点的当前子分支。 */
+  async selectVersion(id, messageId) {
+    const doc = this.get(id);
+    if (!doc) return null;
+    this._normalize(doc);
+    const message = doc.messages.find((item) => item.id === messageId);
+    if (!message) return null;
+    if (message.parentId === null || message.parentId === undefined) {
+      doc.rootMessageId = message.id;
+    } else {
+      const parent = doc.messages.find((item) => item.id === message.parentId);
+      if (!parent) return null;
+      parent.selectedChildId = message.id;
+    }
+    doc.updatedAt = new Date().toISOString();
+    await this._persist(doc);
+    return doc;
+  }
+
+  /** 收集某个父节点下的兄弟版本（用于 UI 的 1/2 切换）。 */
+  siblingsOf(doc, message) {
+    return doc.messages
+      .filter((item) => (item.parentId ?? null) === (message.parentId ?? null))
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   }
 
   async update(id, patch = {}) {
@@ -158,7 +251,8 @@ export class ConversationStore {
     const doc = this.get(id);
     if (!doc) return null;
     const lines = [`# ${doc.title}`, '', `> 模型：${doc.model || '未知'} · 创建：${doc.createdAt}`, ''];
-    for (const msg of doc.messages) {
+    for (const msg of this.visiblePath(doc)) {
+      if (msg.hidden) continue;
       if (msg.role === 'user') {
         lines.push('## 用户', '', msg.content || '（图片）', '');
         if (msg.attachments?.length) {
@@ -196,6 +290,11 @@ export class ConversationStore {
           createdAt: typeof m.createdAt === 'string' ? m.createdAt : new Date().toISOString(),
         }));
       doc.messages = clean;
+      doc.rootMessageId = clean[0]?.id ?? null;
+      clean.forEach((message, index) => {
+        message.parentId = clean[index - 1]?.id ?? null;
+        message.selectedChildId = clean[index + 1]?.id;
+      });
       doc.updatedAt = new Date().toISOString();
       await this._persist(doc);
       created.push(this.meta(doc));

@@ -123,9 +123,18 @@ async function toApiMessage(msg, { includeTools, includeReasoning, attachmentRes
   if (!msg || typeof msg !== 'object') return null;
 
   if (msg.role === 'user') {
+    const fileBlock = (msg.files || [])
+      .filter((file) => file && typeof file.text === 'string' && file.text.trim())
+      .map(
+        (file) =>
+          `\n\n<file name="${String(file.name || 'attachment').slice(0, 80)}">\n${String(file.text).slice(0, 200_000)}\n</file>`,
+      )
+      .join('');
+    const contentText = `${msg.content || ''}${fileBlock}`;
+
     if (msg.attachments?.length && attachmentResolver) {
       const parts = [];
-      if (msg.content) parts.push({ type: 'text', text: msg.content });
+      if (contentText) parts.push({ type: 'text', text: contentText });
       for (const attachment of msg.attachments) {
         const url = await attachmentResolver(attachment);
         if (url) parts.push({ type: 'image_url', image_url: { url, detail: 'high' } });
@@ -133,8 +142,8 @@ async function toApiMessage(msg, { includeTools, includeReasoning, attachmentRes
       if (!parts.length) return null;
       return { role: 'user', content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
     }
-    if (!msg.content) return null;
-    return { role: 'user', content: msg.content };
+    if (!contentText) return null;
+    return { role: 'user', content: contentText };
   }
 
   if (msg.role === 'assistant') {

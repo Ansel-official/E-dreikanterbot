@@ -99,6 +99,36 @@ export default function register() {
     }
   });
 
+  test('会话分支：编辑产生兄弟版本，选择后可见路径切换', async () => {
+    const dir = await tempDir();
+    try {
+      const store = new ConversationStore({ dir });
+      await store.init();
+      const doc = await store.create({});
+      const user = await store.append(doc.id, { role: 'user', content: '第一问' });
+      const first = await store.append(doc.id, { role: 'assistant', content: '第一答' });
+      const second = await store.append(
+        doc.id,
+        { role: 'assistant', content: '第二答' },
+        { parentId: user.id },
+      );
+
+      equal(store.visiblePath(doc).length, 2);
+      equal(store.visiblePath(doc)[1].id, second.id, '新回答应成为当前分支');
+      equal(store.meta(doc).messageCount, 2);
+      equal(store.meta(doc).totalMessages, 3);
+
+      await store.selectVersion(doc.id, first.id);
+      equal(store.visiblePath(doc)[1].id, first.id, '切换版本后应显示旧回答');
+      equal(store.visiblePath(doc).length, 2);
+
+      await store.clearSelectedChild(doc.id, user.id);
+      equal(store.visiblePath(doc).length, 1, '取消选中后路径止于用户消息');
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('会话存储：删除文件后列表消失', async () => {
     const dir = await tempDir();
     try {

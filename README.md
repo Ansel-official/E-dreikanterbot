@@ -1,14 +1,16 @@
 # E-dreikanterbot
 
-**DeepSeek + Kimi 双 Provider 聊天机器人**：按两家官方 API 文档适配、零依赖、单命令启动、全设备自适应，自带长期记忆库与 OpenAI 兼容接口。
+**V2.1.R：对齐 DeepSeek 官方 chat-demo 的聊天体验 + DeepSeek / Kimi 双 Provider + 本地长期记忆库**。零依赖、单命令启动、全设备自适应，聊天记录与分支可持久续聊。
 
 [![CI](https://github.com/Ansel-official/E-dreikanterbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Ansel-official/E-dreikanterbot/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](package.json)
-[![Version](https://img.shields.io/badge/version-1.1.0-4d6bfe.svg)](https://github.com/Ansel-official/E-dreikanterbot/releases)
+[![Version](https://img.shields.io/badge/version-2.1.0--R-4d6bfe.svg)](https://github.com/Ansel-official/E-dreikanterbot/releases)
 
-![桌面端](docs/screens/desktop-answer.png)
+![消息分支](docs/screens/v21-branches.png)
+
+> 参考官方 [chat-demo](https://github.com/deepseek-ai/chat-demo)（MIT）的功能设计，用零依赖 vanilla + Node 重新实现，并扩展了双 Provider 与服务端记忆库；不是直接复制其 React 代码。
 
 ---
 
@@ -16,17 +18,57 @@
 
 一个可以直接部署的双上游聊天机器人，不是套壳：
 
+- **对齐官方 chat-demo 的会话体验**：多会话、自动标题、编辑提问、重新生成、消息分支/版本切换、中断后续写、停止生成、附件、网页读取、语音输入、回复朗读、Markdown/代码高亮、浅色/深色、导入导出
 - **双 Provider，所有模型**：DeepSeek 与 Kimi（Moonshot）官方 `/models` 动态发现；模型列表、上下文、最大输出、视觉/思考/工具能力全部来自官方元数据或官方文档
 - **DeepSeek 官方参数直通**：`thinking` / `reasoning_effort` / `max_tokens`（最高 393216）/ `temperature` / `top_p` / `stop` / `response_format` / `tools` / `safety_check` / `title` / `user_id`
 - **Kimi 官方参数适配**：K3 系列始终思考，使用顶层 `reasoning_effort`；输出用 `max_completion_tokens`（最高 1M）；`prompt_cache_key`、`safety_identifier`、`cache_write_tokens` 均已适配；不会误传 `thinking` / `temperature` / `top_p`
-- **原样解析官方流**：`reasoning_content` 思考链、`usage`（缓存命中/写入）、`finish_reason`、官方错误码
-- **长期记忆库**：本地 BM25 检索 + Top-K 注入；模型可通过 `remember_fact` / `recall_memory` 工具主动读写
-- **图片理解**：支持 JPG / PNG / WebP / GIF，按官方 `image_url` 多模态格式发送（按模型能力校验）
+- **原样解析官方流**：`reasoning_content` 思考链、`usage`（缓存命中/写入）、`finish_reason`、来源引用、官方错误码
+- **长期记忆库**：本地 BM25 检索 + Top-K 注入；模型可通过 `remember_fact` / `recall_memory` 工具主动读写；支持“记住这段对话”与记忆库 JSON 导入导出
+- **继续聊**：会话、分支、未完成草稿、上次打开位置都持久化；重新打开页面自动回到上次对话
+- **附件与读网页**：图片 + txt/md/csv/json/log 文本附件；任意公开网页一键提取正文，作为附件参与对话（含 SSRF 防护）
 - **OpenAI 兼容接口**：`/v1/chat/completions`、`/v1/models`，按模型自动路由到 DeepSeek 或 Kimi
 - **全设备自适应**：桌面三栏、平板抽屉、手机底部输入；PWA 可安装、离线壳、安全区适配
 - **零依赖**：没有 `npm install`，没有构建步骤，`node server.js` 即启动
 
-> 默认 `deepseek-flash`（V4.1 Flash，1M 上下文，支持视觉）；可切换到 `deepseek-v4-pro` 或 Kimi `kimi-k3.1-pro` / `kimi-k3.1-pro-highspeed` / `kimi-k3` / `kimi-k2.6`。
+> 默认 `deepseek-flash`（V4.1 Flash，1M 上下文，支持视觉）；可切换到 `deepseek-v4-pro` 或 Kimi `kimi-k3.1-pro` / `kimi-k3.1-pro-highspeed` / `kimi-k3` / `kimi-k2.7-code` / `kimi-k2.6`。
+
+---
+
+## V2.1.R 新增
+
+| 能力 | 说明 |
+| --- | --- |
+| 消息分支 | 编辑提问/重新生成不会覆盖旧回答，生成兄弟分支；`‹ 2/3 ›` 切换版本 |
+| 继续生成 | 回答被 `length` 截断或手动停止后，可点“继续”从断点续写（DeepSeek / Kimi 都可用） |
+| 文本附件 | 拖拽/粘贴/选择 txt、md、csv、json、log；单文件 20 万字符、合计 50 万字符 |
+| 网页读取 | 输入 URL，服务端抓取正文并作为附件；拒绝内网/本机地址，限制 2MB |
+| 语音输入 | 浏览器 Web Speech API，Chrome / Edge 可用；边说边转写 |
+| 回复朗读 | 浏览器 SpeechSynthesis，一键朗读回答 |
+| 记忆库增强 | “记住这段对话”、记忆库导出/导入、置顶/搜索 |
+| 来源引用 | 解析 DeepSeek 搜索返回的 `annotations`，在回答下方展示来源链接 |
+| 版本/缓存 | 前端资源与 Service Worker 全量刷新，避免旧缓存 |
+
+> 尚未内置：KaTeX 公式、Mermaid 图表、ZIP 格式历史归档（当前用 JSON 导入导出，更透明）、服务端 ASR/TTS。它们不影响聊天、分支与记忆主链路。
+
+### 与官方 chat-demo 的对照
+
+| 能力 | 官方 chat-demo | 本项目 V2.1.R |
+| --- | --- | --- |
+| 多会话 / 自动标题 / 重命名删除 | ✅ | ✅ |
+| 编辑提问 / 重新生成 / 消息分支 | ✅ | ✅ |
+| 截止后续写 | ✅ | ✅（隐藏续写指令） |
+| 停止生成 | ✅ | ✅ |
+| 附件 | 图片 + 文件（Files API） | 图片 + txt/md/csv/json/log |
+| 网页读取 | ✅（服务端扩展） | ✅（服务端抓取 + SSRF 防护） |
+| 搜索与来源引用 | ✅ | DeepSeek 搜索 + `annotations` 引用；Kimi 无搜索 |
+| 语音输入 / 朗读 | ✅（ASR/TTS API） | ✅（浏览器 Web Speech / SpeechSynthesis） |
+| Markdown / 代码高亮 | ✅ | ✅ |
+| KaTeX / Mermaid | ✅ | ❌ |
+| 中英文 / 主题 | ✅ | 中文 + 浅色/深色/跟随系统 |
+| 历史导入导出 | ZIP | JSON |
+| 长期记忆库 | ❌ | ✅ BM25 + 工具 + 摘要 + 导入导出 |
+| 双 Provider | ❌（仅 DeepSeek） | ✅ DeepSeek + Kimi |
+| Key 管理 | 浏览器 localStorage | 服务端 `.env`（不下发前端） |
 
 ---
 
@@ -109,6 +151,10 @@ node scripts/smoke.js kimi-k3.1-pro "你好"     # 需配置 KIMI_API_KEY
 
 ## 截图
 
+| 消息分支 / 编辑重新生成 | 文本附件 / 网页读取 |
+| --- | --- |
+| ![分支](docs/screens/v21-branches.png) | ![附件](docs/screens/v21-attachments.png) |
+
 | 桌面端 | 深色模式 |
 | --- | --- |
 | ![桌面端](docs/screens/desktop-empty.png) | ![深色](docs/screens/desktop-dark.png) |
@@ -167,6 +213,26 @@ curl -N http://localhost:8788/api/chat \
 换成 `deepseek-flash` 时，可额外传 `thinking` / `safety_check` / `title`；服务端会按模型自动只发送该 Provider 支持的参数。
 
 SSE 事件：`meta` → `reasoning` / `content` / `tool` → `usage` → `title` → `done`，错误为 `error`。`meta` 会带上 `provider`、`providerName`、`contextWindow`。
+
+分支与续写：
+
+```json
+{ "conversationId": "c_...", "editMessageId": "m_...", "message": "改后的提问" }
+{ "conversationId": "c_...", "regenerate": true }
+{ "conversationId": "c_...", "continue": true }
+{ "conversationId": "c_...", "message": "总结附件", "textFiles": [{ "name": "notes.md", "text": "..." }] }
+```
+
+- `editMessageId`：在同一个父节点下创建新的用户分支，旧分支保留。
+- `regenerate`：保留旧回答，新建助手兄弟分支。
+- `continue`：插入隐藏续写指令，用于 `finish_reason=length` 或手动停止后的续写。
+- `textFiles`：最多 4 个，单文件 20 万字符、合计 50 万字符，注入为 `<file>` 上下文。
+
+切换分支：`POST /api/conversations/:id/select`，body `{ "messageId": "m_..." }`。
+
+网页读取：`POST /api/read-url`，body `{ "url": "https://..." }`，返回 `{ data: { title, text, url, chars } }`；拒绝内网/本机地址。
+
+记忆库：`GET /api/memory/export` 下载 JSON；`POST /api/memory/import` body `{ "facts": [{ "text": "...", "tags": ["..."] }] }`。
 
 ### OpenAI 兼容接口
 
@@ -269,14 +335,15 @@ KIMI_API_KEY=sk-...
 node tests/run.js
 ```
 
-当前 **39 项**测试，覆盖：
+当前 **45 项**测试，覆盖：
 
 - SSE 跨块 / CRLF / 多行 data 解析
-- 会话持久化、重新生成、导入导出
-- 记忆去重、中文分词、BM25 检索、缓存友好的排序
+- 会话持久化、消息分支/版本切换、编辑/重新生成、继续生成
+- 记忆去重、中文分词、BM25 检索、缓存友好的排序、记忆导入导出
 - DeepSeek 参数组装（thinking / max_tokens / safety_check / title / user_id）
 - Kimi K3 参数适配（reasoning_effort / max_completion_tokens / 无 thinking / 无采样参数）
 - Kimi 缓存写入用量、视觉能力按模型校验
+- 文本附件注入、网页读取与内网 SSRF 拒绝
 - 工具调用两轮循环与 `reasoning_content` 回传
 - 图片校验、附件回读
 - 鉴权、CSRF、限流、路径穿越、安全响应头
@@ -295,6 +362,7 @@ E-dreikanterbot/
 │  ├─ app.js              # HTTP 路由、鉴权、SSE、/v1
 │  ├─ deepseek.js         # 通用上游客户端、SSE 解析、错误码
 │  ├─ providers.js        # DeepSeek / Kimi 模型目录与能力适配
+│  ├─ webread.js          # 网页正文提取 + SSRF 防护
 │  ├─ chat.js             # 对话编排、工具循环、Provider 参数
 │  ├─ context.js          # 上下文拼装与裁剪
 │  ├─ store.js            # 会话存储 + 长期记忆 + BM25
@@ -304,7 +372,7 @@ E-dreikanterbot/
 │  └─ static.js           # 静态资源（ETag/gzip）
 ├─ public/                # 零构建前端
 ├─ demo/                  # mock 上游 + 演示模式
-├─ tests/                 # 39 项测试
+├─ tests/                 # 45 项测试
 ├─ docs/                  # API / 记忆库 / 部署 / ICP / 设备
 └─ scripts/               # 预检、smoke、图标生成
 ```
