@@ -97,6 +97,8 @@ node scripts/smoke.js
 | --- | --- |
 | ![手机](docs/screens/mobile-empty.png) | ![平板](docs/screens/tablet-empty.png) |
 
+> 截图为内置演示模式（本地 mock 上游）录制，所以对话里会出现「这是演示回复」的提示；填入真实 `DEEPSEEK_API_KEY` 后，回答由 DeepSeek 生成。
+
 ---
 
 ## 记忆库是怎么工作的
