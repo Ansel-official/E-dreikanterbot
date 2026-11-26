@@ -16,7 +16,7 @@ cd /opt/e-dreikanterbot
 # 2) 配置
 cp .env.example .env
 chmod 600 .env
-# 编辑 .env：DEEPSEEK_API_KEY、ACCESS_TOKEN、SITE_URL、ICP_NUMBER…
+# 编辑 .env：DEEPSEEK_API_KEY 和/或 KIMI_API_KEY、ACCESS_TOKEN、SITE_URL、ICP_NUMBER…
 
 # 3) 预检
 node scripts/check.js
@@ -123,7 +123,7 @@ chat.example.com {
 
 ```bash
 cp .env.example .env
-# 填 DEEPSEEK_API_KEY、ACCESS_TOKEN
+# 填 DEEPSEEK_API_KEY 和/或 KIMI_API_KEY、ACCESS_TOKEN
 
 docker compose up -d --build
 docker compose logs -f

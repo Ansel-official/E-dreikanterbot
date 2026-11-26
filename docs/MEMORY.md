@@ -151,7 +151,9 @@ DeepSeek 缓存按前缀单元匹配，因此这种稳定顺序能显著提升 `
 
 返回最多 6 条 `{id, text, tags, createdAt, score}`。
 
-> **官方约束**：请求携带 `tools` 时，所有历史助手消息的 `reasoning_content` 必须完整回传。本项目在思考模式下会持久化并回传；若历史中确实缺少（例如导入的旧会话），本轮会自动关闭记忆工具，只做静态记忆注入，避免 400。
+> **官方约束**：DeepSeek 请求携带 `tools` 时，所有历史助手消息的 `reasoning_content` 必须完整回传。本项目在思考模式下会持久化并回传；若历史中确实缺少（例如导入的旧会话），本轮会自动关闭记忆工具，只做静态记忆注入，避免 400。
+>
+> **Kimi K3 系列**：始终开启 Preserved Thinking，无论是否带 tools，多轮请求都应回传历史 assistant 的 `reasoning_content`。本项目对 Kimi 会话默认全量回传；切换模型到 Kimi 时也会尽量保留历史思考内容。
 
 ---
 

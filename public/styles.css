@@ -1854,6 +1854,14 @@ textarea.text-input {
   transform: translateX(18px);
 }
 
+.switch:disabled,
+.segmented button:disabled,
+.mini-toggle:disabled,
+.range:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
 .segmented {
   display: flex;
   gap: 2px;
@@ -1978,6 +1986,159 @@ textarea.text-input {
   background: var(--surface);
   border: 1px solid var(--line);
   color: var(--ink-3);
+}
+
+/* 动态多 Provider 模型列表 */
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.model-group {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.model-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.model-group-head strong {
+  color: var(--ink-2);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.model-status {
+  margin-left: auto;
+  font-size: 9.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ok);
+}
+
+.model-status.off {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: transparent;
+}
+
+.model-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  transition: background 0.12s;
+}
+
+.model-option:last-child {
+  border-bottom: 0;
+}
+
+.model-option:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.model-option.selected {
+  background: var(--accent-softer);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.model-option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.model-radio {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  flex: none;
+  margin-top: 3px;
+}
+
+.model-option.selected .model-radio {
+  border-color: var(--accent);
+  background: radial-gradient(circle at center, var(--accent) 0 42%, transparent 46%);
+}
+
+.model-option-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-option-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.model-option-id {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-option-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.model-option-tags em {
+  font-style: normal;
+  font-size: 9px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-3);
+}
+
+.model-meta {
+  margin-top: 8px;
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+.model-meta strong {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.model-chip[data-provider="kimi"]::before {
+  background: var(--accent);
+}
+
+.model-chip[data-provider="deepseek"]::before {
+  background: var(--ok);
 }
 
 .json-details summary {

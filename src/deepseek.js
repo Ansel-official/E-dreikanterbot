@@ -3,8 +3,8 @@ import { parseRetryAfter, sleep, VERSION } from './util.js';
 /** 官方错误码：https://api-docs.deepseek.com/quick_start/error_codes */
 const HINTS = {
   400: '请求格式不正确。请检查 thinking / reasoning_effort / max_tokens / messages 的结构。',
-  401: 'API Key 无效或已过期，请到 platform.deepseek.com/api_keys 重新创建。',
-  402: '账户余额不足，请到 platform.deepseek.com/top_up 充值。',
+  401: '上游 API Key 无效或已过期（DeepSeek / Kimi 需分别配置），请检查 .env 与平台密钥。',
+  402: '账户余额不足，请到对应平台充值（DeepSeek 或 Moonshot）。',
   408: '请求超时，请检查网络后重试。',
   413: '请求体过大，请压缩图片或减少上下文。',
   422: '参数取值不合法，请参考 docs/API.md 中的取值范围。',

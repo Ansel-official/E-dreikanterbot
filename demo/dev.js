@@ -15,6 +15,8 @@ const mock = await startMock({ port: Number(process.env.MOCK_PORT || 0) });
 const { server, cfg, close } = await createApp({
   apiKey: 'demo-key',
   baseUrl: mock.url,
+  kimiApiKey: 'demo-kimi-key',
+  kimiBaseUrl: `${mock.url}/kimi/v1`,
   dataDir: path.join(root, 'data-demo'),
   host: process.env.HOST || '127.0.0.1',
   port: Number(process.env.PORT || 8789),
@@ -36,7 +38,8 @@ server.listen(cfg.port, cfg.host, () => {
   数据    ${cfg.dataDir}
 
   提示：发送「介绍一下你的能力」看 Markdown，
-        发送「请记住我喜欢深色模式」看记忆工具。
+        发送「请记住我喜欢深色模式」看记忆工具；
+        在参数面板切换到 Kimi 模型，可验证双 Provider 适配。
 `);
 });
 

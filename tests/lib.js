@@ -137,7 +137,7 @@ function chunkBase(model) {
 }
 
 export async function startMock() {
-  const state = { requests: [], failures: [] };
+  const state = { requests: [], kimiRequests: [], failures: [] };
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -147,9 +147,37 @@ export async function startMock() {
         return sendJson(res, 200, {
           object: 'list',
           data: [
-            { id: 'deepseek-flash', object: 'model', owned_by: 'deepseek' },
-            { id: 'deepseek-v4-pro', object: 'model', owned_by: 'deepseek' },
-            { id: 'other-model', object: 'model', owned_by: 'other' },
+            {
+              id: 'deepseek-flash',
+              object: 'model',
+              owned_by: 'deepseek',
+              name: 'DeepSeek-V4.1-Flash',
+              context_window: 1_048_576,
+              max_output_tokens: 393_216,
+              input_modalities: ['text', 'image'],
+              effort: { supported_levels: ['low', 'high', 'max'], default_level: 'high' },
+            },
+            {
+              id: 'deepseek-v4-pro',
+              object: 'model',
+              owned_by: 'deepseek',
+              name: 'DeepSeek-V4-Pro',
+              context_window: 1_048_576,
+              max_output_tokens: 393_216,
+              input_modalities: ['text'],
+              effort: { supported_levels: ['low', 'high', 'max'], default_level: 'high' },
+            },
+          ],
+        });
+      }
+
+      if (req.method === 'GET' && url.pathname === '/kimi/v1/models') {
+        return sendJson(res, 200, {
+          object: 'list',
+          data: [
+            { id: 'kimi-k3.1-pro', object: 'model', owned_by: 'moonshot' },
+            { id: 'kimi-k3', object: 'model', owned_by: 'moonshot' },
+            { id: 'kimi-k2.6', object: 'model', owned_by: 'moonshot' },
           ],
         });
       }
@@ -161,6 +189,58 @@ export async function startMock() {
             { currency: 'CNY', total_balance: '12.34', granted_balance: '0.00', topped_up_balance: '12.34' },
           ],
         });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/kimi/v1/chat/completions') {
+        const body = JSON.parse((await readAll(req)) || '{}');
+        state.kimiRequests.push(body);
+        const text = lastUserText(body);
+        if (text.includes('__401__')) {
+          return sendJson(res, 401, { error: { message: 'mock kimi invalid key', type: 'invalid_authentication_error' } });
+        }
+        const kimiUsage = {
+          prompt_tokens: 100,
+          completion_tokens: 20,
+          total_tokens: 120,
+          cached_tokens: 40,
+          prompt_tokens_details: { cached_tokens: 40, cache_write_tokens: 10 },
+        };
+        if (body.stream === false) {
+          return sendJson(res, 200, {
+            id: 'chatcmpl_kimi_mock',
+            object: 'chat.completion',
+            created: 1_700_000_000,
+            model: body.model,
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: '你好，我是 Kimi。', reasoning_content: 'Kimi 思考：这是演示。' },
+                finish_reason: 'stop',
+              },
+            ],
+            usage: kimiUsage,
+          });
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        });
+        const base = { id: 'chatcmpl_kimi_mock', object: 'chat.completion.chunk', created: 1_700_000_000, model: body.model };
+        const sse = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        sse({ ...base, choices: [{ index: 0, delta: { role: 'assistant', reasoning_content: 'Kimi 思考：' } }] });
+        await delay(3);
+        sse({ ...base, choices: [{ index: 0, delta: { reasoning_content: '这是演示。' } }] });
+        await delay(3);
+        sse({ ...base, choices: [{ index: 0, delta: { content: '你好，我是 ' } }] });
+        await delay(3);
+        sse({ ...base, choices: [{ index: 0, delta: { content: 'Kimi。' } }] });
+        await delay(3);
+        sse({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+        sse({ ...base, choices: [], usage: kimiUsage });
+        res.write('data: [DONE]\n\n');
+        return res.end();
       }
 
       if (req.method === 'POST' && url.pathname === '/chat/completions') {
@@ -284,6 +364,7 @@ export async function startMock() {
     state,
     reset() {
       state.requests.length = 0;
+      state.kimiRequests.length = 0;
     },
     close: () => new Promise((resolve) => server.close(resolve)),
   };
@@ -298,6 +379,8 @@ export async function startApp(mockUrl, overrides = {}) {
   const app = await createApp({
     apiKey: 'test-key',
     baseUrl: mockUrl,
+    kimiApiKey: 'test-kimi-key',
+    kimiBaseUrl: `${mockUrl}/kimi/v1`,
     dataDir,
     accessToken: 'secret-token',
     env: 'test',

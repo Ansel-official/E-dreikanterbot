@@ -1,11 +1,11 @@
 // E-dreikanterbot service worker — 离线壳 + 静态资源缓存
 // 修改前端文件后请同时升级 VERSION，并给 index.html 里的资源加新版本号。
-const VERSION = 'edb-v1.0.0-6';
+const VERSION = 'edb-v1.1.0-1';
 const SHELL = [
   '/',
   '/index.html',
-  '/styles.css?v=5',
-  '/app.js?v=6',
+  '/styles.css?v=6',
+  '/app.js?v=8',
   '/markdown.js?v=4',
   '/manifest.webmanifest',
   '/favicon.svg',

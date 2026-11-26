@@ -62,13 +62,21 @@ export async function buildApiMessages({
   conversation,
   memoryBlock = '',
   includeTools = false,
+  includeReasoning = includeTools,
+  provider = 'deepseek',
   budgetTokens = 900_000,
+  contextWindow = 1_000_000,
   maxMessages = 400,
   reserveOutput = 65_536,
   attachmentResolver = null,
   now = new Date(),
 }) {
   const systemParts = [cfg.systemPrompt];
+  if (provider === 'kimi') {
+    systemParts.push(
+      '当前会话由 Kimi（Moonshot）API 提供，不是 DeepSeek。不要声称自己是 DeepSeek 或使用 DeepSeek 的自称。',
+    );
+  }
   if (memoryBlock) systemParts.push(memoryBlock);
   systemParts.push(dateLine(now, cfg.timezone || 'Asia/Shanghai'));
 
@@ -77,12 +85,12 @@ export async function buildApiMessages({
 
   const entries = [];
   for (const msg of history) {
-    const entry = await toApiMessage(msg, { includeTools, attachmentResolver });
+    const entry = await toApiMessage(msg, { includeTools, includeReasoning, attachmentResolver });
     if (!entry) continue;
     entries.push({ entry, tokens: estimateMessageTokens(entry) });
   }
 
-  const budget = Math.max(2_000, Math.min(budgetTokens, 1_000_000 - reserveOutput - 2_048));
+  const budget = Math.max(2_000, Math.min(budgetTokens, contextWindow - reserveOutput - 2_048));
   const kept = [];
   let used = 0;
   let trimmed = 0;
@@ -111,7 +119,7 @@ export async function buildApiMessages({
   };
 }
 
-async function toApiMessage(msg, { includeTools, attachmentResolver }) {
+async function toApiMessage(msg, { includeTools, includeReasoning, attachmentResolver }) {
   if (!msg || typeof msg !== 'object') return null;
 
   if (msg.role === 'user') {
@@ -132,10 +140,11 @@ async function toApiMessage(msg, { includeTools, attachmentResolver }) {
   if (msg.role === 'assistant') {
     if (!msg.content && !msg.reasoning && !msg.toolCalls?.length) return null;
     const entry = { role: 'assistant', content: msg.content || '' };
-    if (includeTools) {
-      if (msg.thinking || msg.reasoning) entry.reasoning_content = msg.reasoning || '';
-      if (msg.toolCalls?.length) entry.tool_calls = msg.toolCalls;
+    // DeepSeek 仅在有 tools 时要求回传思考内容；Kimi K3 系列始终要求保留式思考。
+    if (includeReasoning || (includeTools && msg.thinking)) {
+      entry.reasoning_content = msg.reasoning || '';
     }
+    if (includeTools && msg.toolCalls?.length) entry.tool_calls = msg.toolCalls;
     if (msg.serverToolCalls?.length) entry.server_tool_calls = msg.serverToolCalls;
     if (msg.annotations?.length) entry.annotations = msg.annotations;
     return entry;

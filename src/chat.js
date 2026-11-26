@@ -1,4 +1,4 @@
-import { EFFORTS, MODELS } from './config.js';
+import { EFFORTS } from './config.js';
 import { buildApiMessages, canPassTools } from './context.js';
 import { streamChatCompletion as defaultStream } from './deepseek.js';
 import { estimateCost } from './pricing.js';
@@ -49,19 +49,25 @@ function emptyUsage() {
     total_tokens: 0,
     prompt_cache_hit_tokens: 0,
     prompt_cache_miss_tokens: 0,
+    cache_write_tokens: 0,
+    reasoning_tokens: 0,
   };
 }
 
 function mergeUsage(total, usage) {
   if (!usage || typeof usage !== 'object') return;
-  const hit = Number(usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0) || 0;
+  const hit =
+    Number(usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? usage.cached_tokens ?? 0) || 0;
+  const write = Number(usage.prompt_tokens_details?.cache_write_tokens ?? 0) || 0;
   const prompt = Number(usage.prompt_tokens) || 0;
-  const miss = Number(usage.prompt_cache_miss_tokens) || Math.max(0, prompt - hit);
+  const miss = Number(usage.prompt_cache_miss_tokens) || Math.max(0, prompt - hit - write);
   total.prompt_tokens += prompt;
   total.completion_tokens += Number(usage.completion_tokens) || 0;
   total.total_tokens += Number(usage.total_tokens) || prompt + (Number(usage.completion_tokens) || 0);
   total.prompt_cache_hit_tokens += hit;
   total.prompt_cache_miss_tokens += miss;
+  total.cache_write_tokens += write;
+  total.reasoning_tokens += Number(usage.completion_tokens_details?.reasoning_tokens) || 0;
 }
 
 function sanitizeUserId(value) {
@@ -83,54 +89,102 @@ function mergeToolCalls(map, deltas) {
   }
 }
 
+function settingsError(message, hint = '') {
+  const error = new Error(message);
+  error.status = 400;
+  error.code = 'invalid_settings';
+  error.hint = hint;
+  return error;
+}
+
 export class ChatService {
-  constructor({ cfg, conversations, memory, stream = defaultStream }) {
+  constructor({ cfg, conversations, memory, registry, stream = defaultStream }) {
     this.cfg = cfg;
     this.conversations = conversations;
     this.memory = memory;
+    this.registry = registry;
     this.stream = stream;
   }
 
   normalizeSettings(raw = {}) {
     const cfg = this.cfg;
-    let thinking = raw.thinking === undefined ? cfg.generation.thinking : Boolean(raw.thinking);
-    let effort = EFFORTS.includes(raw.reasoning_effort) ? raw.reasoning_effort : cfg.generation.reasoningEffort;
-    if (raw.reasoning_effort === 'none') thinking = false;
-    if (!thinking) effort = 'none';
-    else if (effort === 'none') effort = 'high';
+    const fallbackModel = this.registry?.effectiveDefaultModel?.() || cfg.defaultModel;
+    const requested = raw.model === undefined || raw.model === '' ? fallbackModel : String(raw.model);
+    const resolved = this.registry?.resolve(requested);
+    if (!resolved) {
+      throw settingsError(
+        `不支持的模型：${requested}`,
+        '请从 /api/models 返回的列表中选择；Kimi 模型需要先在 .env 配置 KIMI_API_KEY。',
+      );
+    }
+    const meta = resolved.meta;
+    const provider = resolved.provider;
 
+    let thinking;
+    if (meta.thinking.mode === 'always') {
+      thinking = true;
+    } else {
+      thinking = raw.thinking === undefined ? Boolean(meta.thinking.defaultEnabled) : Boolean(raw.thinking);
+    }
+
+    let effort = EFFORTS.includes(raw.reasoning_effort)
+      ? raw.reasoning_effort
+      : meta.thinking.defaultEffort || cfg.generation.reasoningEffort;
+    if (raw.reasoning_effort === 'none') thinking = false;
+    if (meta.thinking.mode === 'always') thinking = true;
+    if (!thinking) effort = 'none';
+    else if (!meta.thinking.efforts.includes(effort)) effort = meta.thinking.defaultEffort || 'high';
+
+    const stopLimit = provider === 'kimi' ? 5 : 16;
+    const stopBytes = provider === 'kimi' ? 32 : 512;
     const stopList = Array.isArray(raw.stop)
       ? raw.stop
       : typeof raw.stop === 'string'
         ? raw.stop.split(/\r?\n/)
         : [];
     const stop = stopList
-      .map((s) => String(s).trim())
+      .map((item) => String(item).trim())
       .filter(Boolean)
-      .filter((s) => Buffer.byteLength(s, 'utf8') <= 512)
-      .slice(0, 16);
+      .filter((item) => Buffer.byteLength(item, 'utf8') <= stopBytes)
+      .slice(0, stopLimit);
 
-    const safety = raw.safety_check && typeof raw.safety_check === 'object' ? raw.safety_check.level : raw.safety_check;
+    const safetyRaw = raw.safety_check && typeof raw.safety_check === 'object' ? raw.safety_check.level : raw.safety_check;
+    const safetyLevel = meta.capabilities.safetyCheck
+      ? safetyRaw === 'high' || safetyRaw === 'low'
+        ? safetyRaw
+        : cfg.safetyLevel
+      : null;
+
+    const supportsWeb = Boolean(meta.capabilities.webTools);
+    const maxDefault = Math.min(cfg.generation.maxTokens, meta.maxOutput);
 
     return {
-      model: MODELS.includes(raw.model) ? raw.model : cfg.defaultModel,
+      model: meta.id,
+      provider,
+      modelMeta: meta,
       thinking,
       reasoningEffort: effort,
-      maxTokens: Math.round(clampNumber(raw.max_tokens, 1, MAX_OUTPUT_TOKENS, cfg.generation.maxTokens)),
+      maxTokens: Math.round(clampNumber(raw.max_tokens, 1, meta.maxOutput, maxDefault)),
       temperature: clampNumber(raw.temperature, 0, 2, cfg.generation.temperature),
       topP: clampNumber(raw.top_p, 0, 1, cfg.generation.topP),
       stop,
       jsonMode: Boolean(raw.json_mode),
-      webSearch: raw.web_search === undefined ? cfg.webToolsEnabled : Boolean(raw.web_search),
-      readUrl: raw.read_url === undefined ? cfg.webToolsEnabled : Boolean(raw.read_url),
+      webSearch: supportsWeb && (raw.web_search === undefined ? cfg.webToolsEnabled : Boolean(raw.web_search)),
+      readUrl: supportsWeb && (raw.read_url === undefined ? cfg.webToolsEnabled : Boolean(raw.read_url)),
       memory: raw.memory === undefined ? cfg.memory.enabled : Boolean(raw.memory),
-      title: raw.title === undefined ? cfg.titleEnabled : Boolean(raw.title),
-      safetyLevel: safety === 'high' || safety === 'low' ? safety : cfg.safetyLevel,
+      title: Boolean(meta.capabilities.title) && (raw.title === undefined ? cfg.titleEnabled : Boolean(raw.title)),
+      safetyLevel,
       userId: sanitizeUserId(raw.user_id),
+      cacheKey: typeof raw.cache_key === 'string' ? raw.cache_key.slice(0, 128) : '',
     };
   }
 
-  buildPayload({ settings, messages, tools }) {
+  buildPayload({ settings, messages, tools, conversation }) {
+    if (settings.provider === 'kimi') return this.buildKimiPayload({ settings, messages, tools, conversation });
+    return this.buildDeepSeekPayload({ settings, messages, tools });
+  }
+
+  buildDeepSeekPayload({ settings, messages, tools }) {
     const payload = {
       model: settings.model,
       messages,
@@ -140,7 +194,9 @@ export class ChatService {
       max_tokens: settings.maxTokens,
       user_id: settings.userId,
     };
-    if (settings.thinking) payload.reasoning_effort = settings.reasoningEffort;
+    if (settings.thinking && settings.reasoningEffort !== 'none') {
+      payload.reasoning_effort = settings.reasoningEffort;
+    }
     if (!settings.thinking) {
       payload.temperature = settings.temperature;
       payload.top_p = settings.topP;
@@ -152,6 +208,32 @@ export class ChatService {
     return payload;
   }
 
+  buildKimiPayload({ settings, messages, tools, conversation }) {
+    const meta = settings.modelMeta;
+    const payload = {
+      model: settings.model,
+      messages,
+      stream: true,
+      stream_options: { include_usage: true },
+      max_completion_tokens: settings.maxTokens,
+      prompt_cache_key: settings.cacheKey || conversation?.id || 'e-dreikanterbot',
+      safety_identifier: settings.userId,
+    };
+
+    // K3 系列始终思考，只接受顶层 reasoning_effort；K2 系列用 thinking 开关。
+    if (meta.thinking.mode === 'always' && meta.thinking.efforts.length) {
+      payload.reasoning_effort = settings.reasoningEffort === 'none' ? 'max' : settings.reasoningEffort;
+    } else if (meta.thinking.mode === 'optional') {
+      payload.thinking = settings.thinking ? { type: 'enabled', keep: 'all' } : { type: 'disabled' };
+    }
+
+    if (settings.stop.length) payload.stop = settings.stop;
+    if (settings.jsonMode) payload.response_format = { type: 'json_object' };
+    if (tools.length) payload.tools = tools;
+    // Kimi K3 的 temperature / top_p 固定为 1.0 / 0.95，显式传入可能报错，因此不发送。
+    return payload;
+  }
+
   /**
    * 执行一轮对话（可能包含多次工具调用），通过 emit 推送 SSE 事件。
    * @param {(event:string, data:object)=>void} emit
@@ -159,8 +241,10 @@ export class ChatService {
   async run({ conversation, settings, signal, emit, attachmentResolver }) {
     const startedAt = Date.now();
     const requestId = newId('req');
+    const meta = settings.modelMeta;
     const canUseMemoryTools = this.cfg.memory.enabled && settings.memory;
-    const toolsEnabled = canUseMemoryTools && canPassTools(conversation);
+    const toolsEnabled = canUseMemoryTools && (settings.provider === 'kimi' || canPassTools(conversation));
+    const includeReasoning = settings.provider === 'kimi' ? true : toolsEnabled;
 
     const lastUser = [...conversation.messages].reverse().find((m) => m.role === 'user');
     const query = typeof lastUser?.content === 'string' ? lastUser.content : '';
@@ -183,7 +267,10 @@ export class ChatService {
       conversation,
       memoryBlock,
       includeTools: toolsEnabled,
+      includeReasoning,
+      provider: settings.provider,
       budgetTokens: this.cfg.context.maxTokens,
+      contextWindow: meta.contextWindow,
       maxMessages: this.cfg.context.maxMessages,
       reserveOutput: settings.maxTokens,
       attachmentResolver,
@@ -196,11 +283,15 @@ export class ChatService {
     emit('meta', {
       requestId,
       conversationId: conversation.id,
+      provider: settings.provider,
+      providerName: meta.providerName,
       model: settings.model,
+      modelName: meta.name,
+      contextWindow: meta.contextWindow,
       thinking: settings.thinking,
       reasoningEffort: settings.reasoningEffort,
       maxTokens: settings.maxTokens,
-      tools: tools.map((t) => t.name || t.function?.name),
+      tools: tools.map((tool) => tool.name || tool.function?.name),
       estimatedTokens: built.estimatedTokens,
       trimmed: built.trimmed,
       budget: built.budget,
@@ -224,14 +315,14 @@ export class ChatService {
     let rounds = 0;
 
     while (rounds <= this.cfg.maxToolRounds) {
-      const payload = this.buildPayload({ settings, messages, tools });
-      if (this.cfg.titleEnabled && settings.title && !conversation.titleLocked && rounds === 0) {
+      const payload = this.buildPayload({ settings, messages, tools, conversation });
+      if (meta.capabilities.title && this.cfg.titleEnabled && settings.title && !conversation.titleLocked && rounds === 0) {
         payload.title = { enabled: true };
       }
 
       let round;
       try {
-        round = await this.streamRound({ payload, signal, emit, settings });
+        round = await this.streamRound({ payload, settings, signal, emit });
       } catch (err) {
         if (isAbortError(err) || signal?.aborted) {
           aborted = true;
@@ -243,6 +334,7 @@ export class ChatService {
             content: allContent,
             reasoning: allReasoning,
             thinking: settings.thinking,
+            provider: settings.provider,
             error: err.message,
             usage,
             model: settings.model,
@@ -267,13 +359,15 @@ export class ChatService {
         break;
       }
 
-      // 官方要求：带 tools 时，助手消息必须回传 reasoning_content 与 tool_calls
+      // DeepSeek 与 Kimi 都要求：带 tools / 思考历史时，助手消息回传 reasoning_content 与 tool_calls。
       const assistantTurn = {
         role: 'assistant',
         content: round.content || '',
         tool_calls: calls,
       };
-      if (settings.thinking) assistantTurn.reasoning_content = round.reasoning || '';
+      if (settings.thinking || settings.provider === 'kimi') {
+        assistantTurn.reasoning_content = round.reasoning || '';
+      }
       messages = [...messages, assistantTurn];
 
       const executed = [];
@@ -295,12 +389,12 @@ export class ChatService {
         });
       }
 
-      // 中间轮次持久化（UI 隐藏），保证后续请求里的 tool 消息成对出现
       await this.conversations.append(conversation.id, {
         role: 'assistant',
         content: round.content || '',
         reasoning: round.reasoning || '',
         thinking: settings.thinking,
+        provider: settings.provider,
         toolCalls: calls,
         hidden: true,
       });
@@ -317,7 +411,7 @@ export class ChatService {
       rounds += 1;
     }
 
-    const cost = estimateCost(settings.model, usage);
+    const cost = estimateCost(settings.model, usage, meta);
     const usageRecord = {
       prompt_tokens: usage.prompt_tokens,
       completion_tokens: usage.completion_tokens,
@@ -325,13 +419,17 @@ export class ChatService {
       cached_tokens: usage.prompt_cache_hit_tokens,
       prompt_cache_hit_tokens: usage.prompt_cache_hit_tokens,
       prompt_cache_miss_tokens: usage.prompt_cache_miss_tokens,
-      cost: cost.total,
+      cache_write_tokens: usage.cache_write_tokens,
+      reasoning_tokens: usage.reasoning_tokens,
+      currency: cost?.currency || (settings.provider === 'kimi' ? 'CNY' : 'USD'),
+      cost: cost ? cost.total : null,
     };
 
     const finalMessage = await this.persistAssistant(conversation, {
       content: allContent,
       reasoning: allReasoning,
       thinking: settings.thinking,
+      provider: settings.provider,
       aborted,
       usage: usageRecord,
       model: settings.model,
@@ -339,7 +437,7 @@ export class ChatService {
       annotations,
     });
 
-    if (title && this.cfg.titleEnabled && settings.title && !conversation.titleLocked) {
+    if (title && meta.capabilities.title && this.cfg.titleEnabled && settings.title && !conversation.titleLocked) {
       const clean = oneLine(title, 80);
       if (clean) {
         await this.conversations.update(conversation.id, { title: clean, titleLocked: false });
@@ -347,7 +445,11 @@ export class ChatService {
       }
     }
 
-    emit('usage', { ...usageRecord, cost: cost.total, costDetail: cost, elapsedMs: Date.now() - startedAt });
+    emit('usage', {
+      ...usageRecord,
+      costDetail: cost,
+      elapsedMs: Date.now() - startedAt,
+    });
     emit('done', {
       messageId: finalMessage?.id,
       finishReason,
@@ -360,7 +462,7 @@ export class ChatService {
     return { message: finalMessage, usage: usageRecord, cost, finishReason, aborted, title };
   }
 
-  async streamRound({ payload, signal, emit, settings }) {
+  async streamRound({ payload, settings, signal, emit }) {
     let content = '';
     let reasoning = '';
     let finishReason = 'stop';
@@ -371,8 +473,8 @@ export class ChatService {
     const toolCalls = new Map();
 
     for await (const chunk of this.stream(payload, {
-      apiKey: this.cfg.apiKey,
-      baseUrl: this.cfg.baseUrl,
+      apiKey: this.registry.apiKeyFor(settings.provider),
+      baseUrl: this.registry.baseUrlFor(settings.provider),
       signal,
       timeoutMs: this.cfg.upstreamTimeoutMs,
     })) {
@@ -398,7 +500,6 @@ export class ChatService {
       if (choice.finish_reason) finishReason = choice.finish_reason;
     }
 
-    // 兼容：部分字段只在整轮的 message 里出现
     const calls = [...toolCalls.values()].map((call, index) => ({
       ...call,
       id: call.id || `call_${Date.now()}_${index}`,
@@ -452,6 +553,7 @@ export class ChatService {
       content: data.content || '',
       reasoning: data.reasoning || '',
       thinking: Boolean(data.thinking),
+      provider: data.provider,
       usage: data.usage,
       model: data.model,
       aborted: Boolean(data.aborted),

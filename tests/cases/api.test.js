@@ -23,6 +23,8 @@ export default function register() {
     equal(config.status, 200);
     equal(config.json.site.icpNumber, '京ICP备2026000000号-1');
     equal(config.json.defaultModel, 'deepseek-flash');
+    assert(config.json.providers.some((p) => p.id === 'kimi' && p.configured), '应暴露 Kimi Provider');
+    assert(config.json.models.some((m) => m.id === 'kimi-k3.1-pro'), '应暴露 Kimi 模型');
     assert(!JSON.stringify(config.json).includes('test-key'));
     assert(!JSON.stringify(config.json).includes('secret-token'));
     equal(config.json.features.login, true);
@@ -272,18 +274,83 @@ export default function register() {
     equal(missing.status, 404);
   });
 
-  test('模型与余额：官方数据，未知模型被过滤', async () => {
+  test('模型与余额：双 Provider 元数据与余额', async () => {
     const { base, cookie } = getContext();
     const models = await request(base, '/api/models', { cookie });
     equal(models.status, 200);
     equal(models.json.source, 'official');
-    const ids = models.json.data.map((m) => m.id);
+    const ids = models.json.models.map((m) => m.id);
     assert(ids.includes('deepseek-flash'));
-    assert(!ids.includes('other-model'), '应过滤掉非官方模型');
+    assert(ids.includes('kimi-k3.1-pro'));
+
+    const providers = models.json.providers.map((p) => p.id);
+    assert(providers.includes('deepseek'));
+    assert(providers.includes('kimi'));
+    assert(models.json.providers.every((p) => p.configured), '测试环境两个 Provider 都应已配置');
+
+    const flash = models.json.models.find((m) => m.id === 'deepseek-flash');
+    equal(flash.contextWindow, 1_048_576);
+    equal(flash.maxOutput, 393_216);
+    equal(flash.capabilities.vision, true);
+
+    const kimi = models.json.models.find((m) => m.id === 'kimi-k3.1-pro');
+    equal(kimi.contextWindow, 1_048_576);
+    equal(kimi.thinking.mode, 'always');
+    equal(kimi.capabilities.vision, true);
 
     const balance = await request(base, '/api/balance', { cookie });
     equal(balance.status, 200);
     equal(balance.json.is_available, true);
+  });
+
+  test('Kimi K3.1：参数适配、流式内容与缓存写入用量', async () => {
+    const { base, cookie, mock } = getContext();
+    mock.reset();
+    const res = await fetch(`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, 'x-requested-with': 'E-dreikanterbot' },
+      body: JSON.stringify({
+        message: '你好 Kimi',
+        settings: { model: 'kimi-k3.1-pro', max_tokens: 2048, thinking: false, web_search: true },
+      }),
+    });
+    equal(res.status, 200);
+    const events = await collectSSE(res);
+    const meta = eventData(events, 'meta')[0];
+    equal(meta.provider, 'kimi');
+    equal(meta.thinking, true, 'K3 始终思考，thinking=false 应被忽略');
+
+    const upstream = mock.state.kimiRequests.at(-1);
+    equal(upstream.model, 'kimi-k3.1-pro');
+    equal(upstream.max_completion_tokens, 2048);
+    assert(!('max_tokens' in upstream), 'Kimi 应使用 max_completion_tokens');
+    equal(upstream.reasoning_effort, 'max');
+    assert(!('thinking' in upstream), 'K3 不接受 thinking 参数');
+    assert(!('safety_check' in upstream), 'Kimi 没有 safety_check');
+    assert(!('temperature' in upstream), 'Kimi K3 采样参数固定，不应发送');
+    assert(!('top_p' in upstream), 'Kimi K3 采样参数固定，不应发送');
+    assert(!upstream.tools?.some((tool) => tool.type === 'deepseek_web_search'), 'Kimi 不应收到 DeepSeek web tools');
+    assert(upstream.prompt_cache_key, 'Kimi 应带 prompt_cache_key');
+    assert(upstream.safety_identifier, 'Kimi 应带 safety_identifier');
+
+    const content = eventData(events, 'content').map((d) => d.delta).join('');
+    equal(content, '你好，我是 Kimi。');
+    const usage = eventData(events, 'usage')[0];
+    equal(usage.cached_tokens, 40);
+    equal(usage.cache_write_tokens, 10);
+    equal(usage.cost, null);
+    equal(usage.currency, 'CNY');
+  });
+
+  test('视觉能力按模型校验：文本模型拒绝图片', async () => {
+    const { base, cookie } = getContext();
+    const res = await request(base, '/api/chat', {
+      method: 'POST',
+      cookie,
+      body: { message: '看图', images: [dataUrl()], settings: { model: 'deepseek-v4-pro' } },
+    });
+    equal(res.status, 400);
+    equal(res.json.error.code, 'model_no_vision');
   });
 
   test('安全响应头与路径穿越防护', async () => {

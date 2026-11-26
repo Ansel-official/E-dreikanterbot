@@ -49,6 +49,7 @@
 ## 部署前必做
 
 - [ ] 设置强随机 `ACCESS_TOKEN`（≥ 24 字符，建议 32 字节随机）
+- [ ] 分别保管 `DEEPSEEK_API_KEY` 与 `KIMI_API_KEY`；任一泄露都会产生账单
 - [ ] 启用 HTTPS
 - [ ] `.env` 权限 600，`.gitignore` 已忽略
 - [ ] 反向代理后设置 `TRUST_PROXY=1`

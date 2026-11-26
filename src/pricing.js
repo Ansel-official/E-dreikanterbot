@@ -42,8 +42,16 @@ export function pricesFor(model, date = new Date()) {
 /**
  * @param {string} model
  * @param {{prompt_cache_hit_tokens?:number, prompt_cache_miss_tokens?:number, prompt_tokens?:number, completion_tokens?:number}} usage
+ * @param {{provider?:string}|Date} [metaOrDate]
  */
-export function estimateCost(model, usage = {}, date = new Date()) {
+export function estimateCost(model, usage = {}, metaOrDate = null) {
+  const meta = metaOrDate instanceof Date ? null : metaOrDate;
+  const date = metaOrDate instanceof Date ? metaOrDate : meta?.date || new Date();
+  // Kimi 的计价表按官方页面实时变化，本项目不硬编码 CN¥ 价格，
+  // 只返回 token 用量，避免给出错误的费用估算。
+  if (meta?.provider === 'kimi' || String(model).startsWith('kimi-')) return null;
+  const table = PRICING[model];
+  if (!table) return null;
   const p = pricesFor(model, date);
   const hit = Math.max(0, Number(usage.prompt_cache_hit_tokens) || 0);
   const prompt = Math.max(0, Number(usage.prompt_tokens) || 0);

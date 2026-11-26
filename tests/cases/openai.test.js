@@ -13,7 +13,7 @@ export default function register() {
     equal(wrong.status, 401);
   });
 
-  test('/v1/models：返回官方模型列表', async () => {
+  test('/v1/models：返回双 Provider 模型列表', async () => {
     const { base } = getContext();
     const res = await request(base, '/v1/models', AUTH);
     equal(res.status, 200);
@@ -21,7 +21,8 @@ export default function register() {
     const ids = res.json.data.map((m) => m.id);
     assert(ids.includes('deepseek-flash'));
     assert(ids.includes('deepseek-v4-pro'));
-    equal(res.json.data[0].context_length, 1_000_000);
+    assert(ids.includes('kimi-k3.1-pro'));
+    equal(res.json.data[0].context_length, 1_048_576);
     equal(res.json.data[0].max_output_tokens, 393_216);
   });
 
@@ -54,8 +55,36 @@ export default function register() {
     assert(!upstream.stream_options, '非流式不应携带 stream_options');
   });
 
-  test('/v1/chat/completions 流式：标准 data 事件与 [DONE]', async () => {
+  test('/v1 Kimi K3.1：Provider 路由与参数改写', async () => {
     const { base, mock } = getContext();
+    mock.reset();
+    const res = await request(base, '/v1/chat/completions', {
+      method: 'POST',
+      ...AUTH,
+      body: {
+        model: 'kimi/kimi-k3.1-pro',
+        messages: [{ role: 'user', content: '你好' }],
+        max_tokens: 512,
+        temperature: 0.3,
+        thinking: { type: 'enabled' },
+        user_id: 'web_v1_test',
+        stream: false,
+      },
+    });
+    equal(res.status, 200);
+    equal(res.json.model, 'kimi-k3.1-pro');
+
+    const upstream = mock.state.kimiRequests.at(-1);
+    equal(upstream.model, 'kimi-k3.1-pro');
+    equal(upstream.max_completion_tokens, 512);
+    assert(!('max_tokens' in upstream), 'max_tokens 应改写为 max_completion_tokens');
+    assert(!('thinking' in upstream), 'K3 应移除 thinking');
+    assert(!('temperature' in upstream), 'Kimi 应移除 temperature');
+    assert(!('safety_check' in upstream), 'Kimi 应移除 safety_check');
+    equal(upstream.safety_identifier, 'web_v1_test');
+  });
+
+  test('/v1/chat/completions 流式：标准 data 事件与 [DONE]', async () => {    const { base, mock } = getContext();
     mock.reset();
     const res = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST',

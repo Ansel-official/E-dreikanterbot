@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import os from 'node:os';
 import { createApp } from './src/app.js';
+import { VERSION } from './src/util.js';
 
-const { server, cfg, close } = await createApp();
+const { server, cfg, registry, close } = await createApp();
 
 function lanUrls() {
   const urls = [];
@@ -18,7 +19,7 @@ server.listen(cfg.port, cfg.host, () => {
   const local = `http://localhost:${cfg.port}`;
   const lines = [
     '',
-    '  \x1b[1mE-dreikanterbot\x1b[0m  \x1b[2mv1.0.0\x1b[0m',
+    '  \x1b[1mE-dreikanterbot\x1b[0m  \x1b[2mv' + VERSION + '\x1b[0m',
     '  ─────────────────────────────────────────────',
     `  本机访问   ${local}`,
   ];
@@ -27,14 +28,15 @@ server.listen(cfg.port, cfg.host, () => {
   }
   lines.push(
     `  数据目录   ${cfg.dataDir}`,
-    `  默认模型   ${cfg.defaultModel}`,
-    `  API Key    ${cfg.apiKey ? '已配置' : '\x1b[33m未配置（无法对话）\x1b[0m'}`,
+    `  默认模型   ${registry.effectiveDefaultModel()}`,
+    `  DeepSeek   ${cfg.apiKey ? '已配置' : '\x1b[33m未配置\x1b[0m'}`,
+    `  Kimi       ${cfg.kimiApiKey ? '已配置' : '\x1b[33m未配置（仅禁用 Kimi 模型）\x1b[0m'}`,
     `  访问密码   ${cfg.accessToken ? '已启用' : '未设置'}`,
     `  ICP 备案   ${cfg.site.icpNumber || '\x1b[33m未配置\x1b[0m'}`,
     '  ─────────────────────────────────────────────',
   );
-  if (!cfg.apiKey) {
-    lines.push('  下一步：cp .env.example .env，填入 DEEPSEEK_API_KEY 后重启。');
+  if (!cfg.apiKey && !cfg.kimiApiKey) {
+    lines.push('  下一步：cp .env.example .env，填入 DEEPSEEK_API_KEY 或 KIMI_API_KEY 后重启。');
   }
   if (cfg.host === '0.0.0.0' && !cfg.accessToken) {
     lines.push('  \x1b[33m提示：正在监听所有网卡且未设置 ACCESS_TOKEN，公网部署前请务必设置。\x1b[0m');

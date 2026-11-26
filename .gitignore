@@ -5,6 +5,7 @@ node_modules/
 data/
 data-demo/
 data-test/
+data-live/
 .env
 .env.local
 .env.*.local

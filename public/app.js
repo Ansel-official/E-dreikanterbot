@@ -27,11 +27,12 @@ function formatTokens(value) {
   return String(n);
 }
 
-function formatCost(value) {
+function formatCost(value, currency = 'USD') {
   const n = Number(value) || 0;
-  if (!n) return '$0';
-  if (n < 0.000001) return '<$0.000001';
-  return `$${n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}`;
+  const symbol = currency === 'CNY' ? '¥' : '$';
+  if (!n) return `${symbol}0`;
+  if (n < 0.000001) return `<${symbol}0.000001`;
+  return `${symbol}${n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}`;
 }
 
 function formatDuration(ms) {
@@ -272,33 +273,91 @@ function loadSavedSettings() {
 function defaultsFromConfig() {
   const config = state.config || {};
   const defaults = config.defaults || {};
+  const catalog = config.models || [];
+  const model =
+    catalog.find((item) => item.id === config.defaultModel) ||
+    catalog.find((item) => providerById(item.provider)?.configured) ||
+    catalog[0] ||
+    null;
+  const meta = model;
+  const maxTokens = Math.min(Number(defaults.maxTokens) || 65_536, meta?.maxOutput || 393_216);
+
   return {
-    model: config.defaultModel || 'deepseek-flash',
-    thinking: defaults.thinking !== false,
-    reasoning_effort: defaults.reasoningEffort || 'high',
-    max_tokens: defaults.maxTokens || 65536,
+    model: meta?.id || config.defaultModel || 'deepseek-flash',
+    thinking: meta?.thinking?.mode === 'always' ? true : defaults.thinking !== false,
+    reasoning_effort: meta?.thinking?.defaultEffort || defaults.reasoningEffort || 'high',
+    max_tokens: maxTokens,
     temperature: defaults.temperature ?? 1,
     top_p: defaults.topP ?? 0.95,
     stop: [],
     json_mode: false,
-    web_search: Boolean(defaults.webTools),
-    read_url: Boolean(defaults.webTools),
+    web_search: Boolean(meta?.capabilities?.webTools && defaults.webTools),
+    read_url: Boolean(meta?.capabilities?.webTools && defaults.webTools),
     memory: defaults.memory !== false,
-    title: defaults.title !== false,
+    title: Boolean(meta?.capabilities?.title && defaults.title),
     safety: defaults.safetyLevel === 'low' ? 'low' : 'high',
   };
 }
 
 function mergeDefaults() {
   state.settings = { ...defaultsFromConfig(), ...loadSavedSettings() };
-  if (!['deepseek-flash', 'deepseek-v4-pro'].includes(state.settings.model)) {
-    state.settings.model = state.config.defaultModel;
+  const selected = modelById(state.settings.model);
+  if (!selected || !isProviderConfigured(selected.provider)) {
+    const fallback =
+      modelById(state.config?.defaultModel) ||
+      (state.config?.models || []).find((item) => isProviderConfigured(item.provider)) ||
+      (state.config?.models || [])[0];
+    if (fallback) state.settings.model = fallback.id;
   }
-  if (!['low', 'high', 'max'].includes(state.settings.reasoning_effort)) {
-    state.settings.reasoning_effort = 'high';
+
+  const meta = currentModel();
+  if (meta) {
+    if (meta.thinking.mode === 'always') state.settings.thinking = true;
+    if (!meta.thinking.efforts.includes(state.settings.reasoning_effort)) {
+      state.settings.reasoning_effort = meta.thinking.defaultEffort || 'high';
+    }
+    state.settings.max_tokens = Math.min(
+      Number(state.settings.max_tokens) || 65_536,
+      meta.maxOutput || 393_216,
+    );
+    if (!meta.capabilities.webTools) {
+      state.settings.web_search = false;
+      state.settings.read_url = false;
+    }
+    if (!meta.capabilities.title) state.settings.title = false;
   }
-  state.settings.max_tokens = Math.min(393216, Math.max(1, Number(state.settings.max_tokens) || 65536));
   state.settings.stop = Array.isArray(state.settings.stop) ? state.settings.stop.slice(0, 16) : [];
+}
+
+function modelById(id) {
+  return (state.config?.models || []).find((model) => model.id === id) || null;
+}
+
+function providerById(id) {
+  return (state.config?.providers || []).find((provider) => provider.id === id) || null;
+}
+
+function isProviderConfigured(providerId) {
+  return Boolean(providerById(providerId)?.configured);
+}
+
+function currentModel() {
+  return modelById(state.settings.model) || (state.config?.models || [])[0] || null;
+}
+
+function modelShortName(meta) {
+  if (!meta) return '—';
+  const map = {
+    'deepseek-flash': 'flash',
+    'deepseek-v4-pro': 'pro',
+    'kimi-k3.1-pro': 'k3.1',
+    'kimi-k3.1-pro-highspeed': 'k3.1-fast',
+    'kimi-k3': 'k3',
+    'kimi-k2.7-code': 'k2.7',
+    'kimi-k2.7-code-highspeed': 'k2.7-fast',
+    'kimi-k2.6': 'k2.6',
+  };
+  return map[meta.id] || meta.id;
 }
 
 function saveSettings() {
@@ -313,11 +372,16 @@ function updateSetting(patch) {
 }
 
 function settingsPayload() {
+  const meta = currentModel();
+  const maxTokens = Math.min(
+    meta?.maxOutput || 393_216,
+    Math.max(1, Math.round(Number(state.settings.max_tokens) || 65_536)),
+  );
   return {
     model: state.settings.model,
     thinking: Boolean(state.settings.thinking),
     reasoning_effort: state.settings.thinking ? state.settings.reasoning_effort : 'none',
-    max_tokens: Math.min(393216, Math.max(1, Math.round(Number(state.settings.max_tokens) || 65536))),
+    max_tokens: maxTokens,
     temperature: Number(state.settings.temperature),
     top_p: Number(state.settings.top_p),
     stop: state.settings.stop,
@@ -339,50 +403,203 @@ function parseStop(value) {
     .slice(0, 16);
 }
 
+function renderModelList() {
+  const host = $('#model-list');
+  if (!host) return;
+  const providers = state.config?.providers || [];
+  if (!providers.length) {
+    host.innerHTML = '<div class="memory-empty">暂无可用模型</div>';
+    return;
+  }
+
+  host.innerHTML = '';
+  for (const provider of providers) {
+    const group = document.createElement('div');
+    group.className = 'model-group';
+    const head = document.createElement('div');
+    head.className = 'model-group-head';
+    head.innerHTML =
+      `<strong>${escapeHtml(provider.name)}</strong>` +
+      `<span class="model-status ${provider.configured ? '' : 'off'}" title="${escapeHtml(provider.error || provider.keyHint || '')}">` +
+      `${provider.configured ? (provider.error ? '列表降级' : '已配置') : '未配置 Key'}</span>`;
+    group.appendChild(head);
+
+    for (const modelId of provider.models) {
+      const meta = modelById(modelId);
+      if (!meta) continue;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `model-option${state.settings.model === meta.id ? ' selected' : ''}`;
+      button.dataset.model = meta.id;
+      button.disabled = !provider.configured;
+
+      const tags = [];
+      if (meta.capabilities.vision) tags.push('视觉');
+      if (meta.thinking.mode === 'always') tags.push('始终思考');
+      else if (meta.thinking.mode === 'toggle') tags.push('深度思考');
+      else tags.push('可关思考');
+      if (meta.capabilities.tools) tags.push('工具');
+      if (meta.deprecated) tags.push('即将下线');
+      tags.push(`${formatContext(meta.contextWindow)} 上下文`);
+      tags.push(`最大 ${formatTokens(meta.maxOutput)}`);
+
+      button.innerHTML =
+        '<span class="model-radio"></span>' +
+        '<span class="model-option-main">' +
+        `<span class="model-option-name">${escapeHtml(meta.name)}</span>` +
+        `<span class="model-option-id">${escapeHtml(meta.id)}</span>` +
+        `<span class="model-option-tags">${tags.map((tag) => `<em>${escapeHtml(tag)}</em>`).join('')}</span>` +
+        '</span>';
+      group.appendChild(button);
+    }
+    host.appendChild(group);
+  }
+}
+
+function selectModel(modelId) {
+  const meta = modelById(modelId);
+  if (!meta) return;
+  if (!isProviderConfigured(meta.provider)) {
+    const provider = providerById(meta.provider);
+    toast(`${provider?.name || meta.provider} 尚未配置 API Key`, 'error');
+    return;
+  }
+  const patch = {
+    model: meta.id,
+    max_tokens: Math.min(Number(state.settings.max_tokens) || meta.maxOutput, meta.maxOutput),
+  };
+  if (meta.thinking.mode === 'always') patch.thinking = true;
+  if (!meta.thinking.efforts.includes(state.settings.reasoning_effort)) {
+    patch.reasoning_effort = meta.thinking.defaultEffort || 'high';
+  }
+  if (!meta.capabilities.webTools) {
+    patch.web_search = false;
+    patch.read_url = false;
+  }
+  if (!meta.capabilities.title) patch.title = false;
+  updateSetting(patch);
+}
+
 function syncSettingsUI() {
   if (!state.settings.model) return;
   const s = state.settings;
+  const meta = currentModel();
 
-  $$('#model-cards input').forEach((input) => {
-    input.checked = input.value === s.model;
-  });
+  renderModelList();
 
+  const canEffort = Boolean(meta?.thinking.efforts.length);
+  const alwaysThinking = meta?.thinking.mode === 'always';
   $$('#effort-seg button').forEach((button) => {
     button.classList.toggle('active', button.dataset.effort === s.reasoning_effort);
-    button.disabled = !s.thinking;
+    button.disabled = !s.thinking || !canEffort || !meta.thinking.efforts.includes(button.dataset.effort);
   });
 
-  if ($('#max-tokens')) $('#max-tokens').value = String(s.max_tokens);
+  if ($('#max-tokens')) {
+    const max = meta?.maxOutput || 393_216;
+    const value = Math.min(Number(s.max_tokens) || max, max);
+    s.max_tokens = value;
+    $('#max-tokens').max = String(max);
+    $('#max-tokens').value = String(value);
+  }
   $$('#token-presets button').forEach((button) => {
     button.classList.toggle('accent', Number(button.dataset.tokens) === Number(s.max_tokens));
   });
 
+  const fixedSampling = meta?.provider === 'kimi';
   if ($('#temperature')) {
     $('#temperature').value = String(s.temperature);
     $('#temperature-value').textContent = Number(s.temperature).toFixed(2);
-    $('#temperature').disabled = Boolean(s.thinking);
+    $('#temperature').disabled = fixedSampling || Boolean(s.thinking);
   }
   if ($('#top-p')) {
     $('#top-p').value = String(s.top_p);
     $('#top-p-value').textContent = Number(s.top_p).toFixed(2);
-    $('#top-p').disabled = Boolean(s.thinking);
+    $('#top-p').disabled = fixedSampling || Boolean(s.thinking);
   }
   if ($('#stop-sequences') && document.activeElement !== $('#stop-sequences')) {
     $('#stop-sequences').value = (s.stop || []).join('\n');
   }
 
-  setSwitch('#thinking-switch', s.thinking);
+  const thinkingSwitch = $('#thinking-switch');
+  if (thinkingSwitch) {
+    thinkingSwitch.setAttribute('aria-checked', String(alwaysThinking ? true : Boolean(s.thinking)));
+    thinkingSwitch.disabled = alwaysThinking;
+    thinkingSwitch.title = alwaysThinking ? '该模型始终开启思考' : '';
+  }
   setSwitch('#json-switch', s.json_mode);
   setSwitch('#web-search-switch', s.web_search);
   setSwitch('#read-url-switch', s.read_url);
   setSwitch('#memory-switch', s.memory);
   setSwitch('#title-switch', s.title);
 
+  const webAllowed = Boolean(meta?.capabilities.webTools);
+  for (const selector of ['#web-search-switch', '#read-url-switch']) {
+    const el = $(selector);
+    if (el) {
+      el.disabled = !webAllowed;
+      el.title = webAllowed ? '' : 'Kimi 不提供 DeepSeek 的 web tools；请使用 Kimi 官方工具方案';
+    }
+  }
+  const titleSwitch = $('#title-switch');
+  if (titleSwitch) {
+    titleSwitch.disabled = !meta?.capabilities.title;
+    titleSwitch.title = meta?.capabilities.title ? '' : 'Kimi 不支持 title 扩展';
+  }
+
   $$('#safety-seg button').forEach((button) => {
     button.classList.toggle('active', button.dataset.safety === s.safety);
+    button.disabled = !meta?.capabilities.safetyCheck;
+    button.title = meta?.capabilities.safetyCheck ? '' : 'Kimi 不提供 safety_check';
   });
 
-  $('#model-chip').textContent = s.model === 'deepseek-v4-pro' ? 'pro' : 'flash';
+  const chip = $('#model-chip');
+  if (chip) {
+    chip.textContent = modelShortName(meta);
+    chip.dataset.provider = meta?.provider || '';
+    chip.title = meta ? `${meta.providerName} · ${meta.name}` : '';
+  }
+
+  const metaHost = $('#model-meta');
+  if (metaHost) {
+    if (meta) {
+      const thinkText =
+        meta.thinking.mode === 'always'
+          ? '始终思考'
+          : meta.thinking.mode === 'optional'
+            ? '思考可关闭'
+            : '思考可开关';
+      metaHost.innerHTML =
+        `<strong>${escapeHtml(meta.providerName)} · ${escapeHtml(meta.name)}</strong><br>` +
+        `上下文 ${formatContext(meta.contextWindow)} · 最大输出 ${formatTokens(meta.maxOutput)} · ` +
+        `${meta.capabilities.vision ? '支持视觉' : '纯文本'} · ${thinkText}`;
+    } else {
+      metaHost.textContent = '未找到模型元数据';
+    }
+  }
+
+  const maxHint = $('#max-tokens-hint');
+  if (maxHint && meta) {
+    maxHint.textContent =
+      meta.provider === 'kimi'
+        ? `Kimi 官方 max_completion_tokens 上限 ${meta.maxOutput.toLocaleString()}，默认 131072。`
+        : `官方上限 ${meta.maxOutput.toLocaleString()}（384K）。实际消耗以 API 返回的 usage 为准。`;
+  }
+  const thinkHint = $('#thinking-hint');
+  if (thinkHint && meta) {
+    thinkHint.textContent =
+      meta.thinking.mode === 'always'
+        ? 'Kimi K3 系列始终开启 Preserved Thinking，只可调 reasoning_effort（默认 max）。'
+        : meta.thinking.mode === 'optional'
+          ? 'Kimi K2.6 可关闭思考；关闭后不返回 reasoning_content。'
+          : '思考模式下 temperature / top_p 会被 DeepSeek 官方忽略，这是预期行为。';
+  }
+  const safetyHint = $('#safety-hint');
+  if (safetyHint && meta) {
+    safetyHint.textContent = meta.capabilities.safetyCheck
+      ? '面向公众提供服务时，请保持 high 并落实内容审核、生成式 AI 备案与标识义务。'
+      : 'Kimi 不提供 safety_check，改用 safety_identifier；内容审核与备案义务仍需你自行落实。';
+  }
+
   renderRequestPreview();
 }
 
@@ -390,10 +607,17 @@ function setSwitch(selector, value) {
   $(selector)?.setAttribute('aria-checked', String(Boolean(value)));
 }
 
+function formatContext(value) {
+  const n = Number(value) || 0;
+  if (n >= 1_000_000) return `${(n / 1_048_576).toFixed(n % 1_048_576 === 0 ? 0 : 1)}M`;
+  return `${Math.round(n / 1024)}K`;
+}
+
 function renderRequestPreview() {
   const pre = $('#request-preview');
   if (!pre || !state.settings.model) return;
   const s = state.settings;
+  const meta = currentModel();
   const payload = {
     model: s.model,
     messages: [
@@ -402,28 +626,41 @@ function renderRequestPreview() {
     ],
     stream: true,
     stream_options: { include_usage: true },
-    thinking: { type: s.thinking ? 'enabled' : 'disabled' },
-    reasoning_effort: s.thinking ? s.reasoning_effort : undefined,
-    max_tokens: Number(s.max_tokens),
-    temperature: s.thinking ? undefined : Number(s.temperature),
-    top_p: s.thinking ? undefined : Number(s.top_p),
-    user_id: state.clientId,
   };
-  if (!s.thinking) {
-    delete payload.reasoning_effort;
+
+  if (meta?.provider === 'kimi') {
+    payload.max_completion_tokens = Number(s.max_tokens);
+    if (meta.thinking.mode === 'always') {
+      payload.reasoning_effort = s.reasoning_effort;
+    } else if (meta.thinking.mode === 'optional') {
+      payload.thinking = { type: s.thinking ? 'enabled' : 'disabled', keep: 'all' };
+    }
+    payload.prompt_cache_key = '（当前会话 id）';
+    payload.safety_identifier = state.clientId;
+    if (s.stop?.length) payload.stop = s.stop.slice(0, 5);
+    if (s.json_mode) payload.response_format = { type: 'json_object' };
+    const tools = [];
+    if (s.memory) tools.push('remember_fact', 'recall_memory');
+    if (tools.length) payload.tools = tools.map((name) => `…${name}`);
   } else {
-    delete payload.temperature;
-    delete payload.top_p;
+    payload.thinking = { type: s.thinking ? 'enabled' : 'disabled' };
+    payload.max_tokens = Number(s.max_tokens);
+    payload.user_id = state.clientId;
+    if (s.thinking) payload.reasoning_effort = s.reasoning_effort;
+    else {
+      payload.temperature = Number(s.temperature);
+      payload.top_p = Number(s.top_p);
+    }
+    if (s.stop?.length) payload.stop = s.stop;
+    if (s.json_mode) payload.response_format = { type: 'json_object' };
+    if (s.safety === 'high') payload.safety_check = { level: 'high' };
+    if (s.title) payload.title = { enabled: true };
+    const tools = [];
+    if (s.memory) tools.push('remember_fact', 'recall_memory');
+    if (s.web_search) tools.push('deepseek_web_search');
+    if (s.read_url) tools.push('deepseek_read_url');
+    if (tools.length) payload.tools = tools.map((name) => `…${name}`);
   }
-  if (s.stop?.length) payload.stop = s.stop;
-  if (s.json_mode) payload.response_format = { type: 'json_object' };
-  if (s.safety === 'high') payload.safety_check = { level: 'high' };
-  if (s.title) payload.title = { enabled: true };
-  const tools = [];
-  if (s.memory) tools.push('remember_fact', 'recall_memory');
-  if (s.web_search) tools.push('deepseek_web_search');
-  if (s.read_url) tools.push('deepseek_read_url');
-  if (tools.length) payload.tools = tools.map((name) => `…${name}`);
 
   pre.textContent = JSON.stringify(payload, null, 2);
 }
@@ -438,24 +675,25 @@ function resetSettings() {
 }
 
 function maxSettings() {
+  const meta = currentModel();
+  const efforts = meta?.thinking.efforts || [];
   Object.assign(state.settings, {
-    model: 'deepseek-v4-pro',
     thinking: true,
-    reasoning_effort: 'max',
-    max_tokens: 393216,
+    reasoning_effort: efforts.includes('max') ? 'max' : efforts.at(-1) || 'high',
+    max_tokens: meta?.maxOutput || 393_216,
     temperature: 1,
     top_p: 1,
     json_mode: false,
-    web_search: true,
-    read_url: true,
+    web_search: Boolean(meta?.capabilities.webTools),
+    read_url: Boolean(meta?.capabilities.webTools),
     memory: true,
-    title: true,
+    title: Boolean(meta?.capabilities.title),
     safety: 'high',
   });
   saveSettings();
   syncSettingsUI();
   renderComposerState();
-  toast('已拉满：v4-pro · max effort · 384K 输出 · 联网 · 记忆');
+  toast(`已拉满：${meta?.name || state.settings.model} · 最大输出 ${formatTokens(meta?.maxOutput || 393_216)}`);
 }
 
 /* ==========================================================================
@@ -498,9 +736,10 @@ function renderConfigBits() {
     notice.hidden = !missing;
     if (missing) {
       notice.innerHTML =
-        `${icon('key')}<div><strong>还没有配置 DeepSeek API Key</strong><br />` +
-        `在项目根目录执行 <code>cp .env.example .env</code>，填入 <code>DEEPSEEK_API_KEY</code> 后重启服务即可对话。` +
-        `<br /><a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">申请 API Key</a></div>`;
+        `${icon('key')}<div><strong>还没有配置上游 API Key</strong><br />` +
+        `在项目根目录执行 <code>cp .env.example .env</code>，填入 <code>DEEPSEEK_API_KEY</code>（DeepSeek）或 <code>KIMI_API_KEY</code>（Kimi）后重启服务。` +
+        `<br /><a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">DeepSeek Key</a>` +
+        ` · <a href="https://platform.moonshot.cn/console/api-keys" target="_blank" rel="noopener">Kimi Key</a></div>`;
     }
   }
 
@@ -611,7 +850,7 @@ function emptyState() {
   wrapper.innerHTML = `
     <div class="empty-orb" aria-hidden="true">E</div>
     <h1>${greeting}，今天想聊点什么？</h1>
-    <p class="lead">直连 DeepSeek 官方 API 的聊天机器人：深度思考、长期记忆、图片理解与联网搜索，都在这里。</p>
+    <p class="lead">直连 DeepSeek 与 Kimi 官方 API 的双 Provider 聊天机器人：深度思考、长期记忆、图片理解与 OpenAI 兼容接口。</p>
     <div class="suggestions">
       ${suggestions
         .map(
@@ -625,7 +864,7 @@ function emptyState() {
       <button class="btn accent" data-action="max-settings">${icon('spark')} 参数拉满试试</button>
       <button class="btn ghost" data-action="open-memory">${icon('brain')} 查看记忆库</button>
     </div>
-    <div class="badge-row"><span>1M 上下文</span><span>384K 输出</span><span>流式思考</span><span>OpenAI 兼容接口</span></div>`;
+    <div class="badge-row"><span>1M 上下文</span><span>双 Provider</span><span>流式思考</span><span>OpenAI 兼容接口</span></div>`;
   return wrapper;
 }
 
@@ -744,7 +983,8 @@ function footHtml(msg) {
     parts.push(`↓ ${formatTokens(usage.completion_tokens)}`);
     const cached = Number(usage.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0);
     if (usage.prompt_tokens) parts.push(`缓存 ${Math.round((cached / usage.prompt_tokens) * 100)}%`);
-    if (usage.cost) parts.push(formatCost(usage.cost));
+    if (usage.cache_write_tokens) parts.push(`写入 ${formatTokens(usage.cache_write_tokens)}`);
+    if (usage.cost) parts.push(formatCost(usage.cost, usage.currency));
   }
   if (msg.aborted) parts.push('已停止');
   if (!parts.length) return '';
@@ -839,15 +1079,17 @@ function renderUsage() {
   const prompt = Number(usage.prompt_tokens) || 0;
   const cachePct = prompt ? Math.round((hit / prompt) * 100) : 0;
   const pieces = [`↑ ${formatTokens(prompt)}`, `↓ ${formatTokens(usage.completion_tokens)}`, `缓存 ${cachePct}%`];
-  if (usage.cost) pieces.push(formatCost(usage.cost));
+  if (usage.cache_write_tokens) pieces.push(`写缓存 ${formatTokens(usage.cache_write_tokens)}`);
+  if (usage.cost) pieces.push(formatCost(usage.cost, usage.currency));
   if (usage.elapsedMs) pieces.push(formatDuration(usage.elapsedMs));
   $('#usage-text').textContent = pieces.join(' · ');
 
-  const tier = usage.costDetail?.tier || state.config?.pricing?.tier || '';
+  const isKimi = usage.currency === 'CNY';
+  const tier = isKimi ? '' : usage.costDetail?.tier || state.config?.pricing?.tier || '';
   const tierEl = $('#usage-tier');
-  tierEl.textContent = tier === 'peak' ? '高峰计价' : tier ? '低峰计价' : '';
+  tierEl.textContent = isKimi ? 'Kimi 计价' : tier === 'peak' ? '高峰计价' : tier ? '低峰计价' : '';
   tierEl.className = `usage-tier ${tier === 'peak' ? 'peak' : ''}`;
-  tierEl.title = '按官方 UTC 高峰时段估算，未扣除法定节假日';
+  tierEl.title = isKimi ? 'Kimi 费用请以 Moonshot 控制台账单为准' : '按官方 UTC 高峰时段估算，未扣除法定节假日';
 }
 
 /* ==========================================================================
@@ -874,10 +1116,22 @@ function renderComposerState() {
     btn.title = '发送';
     btn.setAttribute('aria-label', '发送');
   }
-  $('#thinking-toggle')?.classList.toggle('on', Boolean(state.settings.thinking));
-  $('#web-toggle')?.classList.toggle('on', Boolean(state.settings.web_search));
-  $('#thinking-toggle')?.setAttribute('aria-pressed', String(Boolean(state.settings.thinking)));
-  $('#web-toggle')?.setAttribute('aria-pressed', String(Boolean(state.settings.web_search)));
+  const meta = currentModel();
+  const alwaysThinking = meta?.thinking.mode === 'always';
+  const thinkingBtn = $('#thinking-toggle');
+  const webBtn = $('#web-toggle');
+  if (thinkingBtn) {
+    thinkingBtn.classList.toggle('on', alwaysThinking || Boolean(state.settings.thinking));
+    thinkingBtn.setAttribute('aria-pressed', String(alwaysThinking || Boolean(state.settings.thinking)));
+    thinkingBtn.disabled = alwaysThinking;
+    thinkingBtn.title = alwaysThinking ? '该模型始终思考' : '切换深度思考';
+  }
+  if (webBtn) {
+    webBtn.classList.toggle('on', Boolean(state.settings.web_search));
+    webBtn.setAttribute('aria-pressed', String(Boolean(state.settings.web_search)));
+    webBtn.disabled = !meta?.capabilities.webTools;
+    webBtn.title = meta?.capabilities.webTools ? '切换联网搜索' : '当前模型不支持 DeepSeek web tools';
+  }
 }
 
 function renderAttachments() {
@@ -1023,13 +1277,22 @@ async function sendMessage({ text = null, regenerate = false } = {}) {
     return;
   }
   if (!state.config?.features?.keyConfigured) {
-    toast('服务端未配置 DEEPSEEK_API_KEY', 'error');
+    toast('服务端未配置任何上游 API Key（DeepSeek / Kimi）', 'error');
+    return;
+  }
+  const meta = currentModel();
+  if (meta && !isProviderConfigured(meta.provider)) {
+    toast(`${meta.providerName} 尚未配置 API Key`, 'error');
     return;
   }
 
   const content = (text ?? $('#composer').value).trim();
   const images = regenerate ? [] : state.draftImages.map((image) => image.dataUrl);
   if (!regenerate && !content && !images.length) return;
+  if (images.length && meta && !meta.capabilities.vision) {
+    toast(`${meta.name} 不支持图片，请切换到视觉模型`, 'error');
+    return;
+  }
   if (content.length > 100_000) {
     toast('单条消息不能超过 10 万字符', 'error');
     return;
@@ -1661,11 +1924,19 @@ function bindEvents() {
   });
 
   /* 设置面板 */
-  $('#model-cards')?.addEventListener('change', (event) => {
-    if (event.target.name === 'model') updateSetting({ model: event.target.value });
+  $('#model-list')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-model]');
+    if (button && !button.disabled) selectModel(button.dataset.model);
   });
 
-  $('#thinking-switch')?.addEventListener('click', () => updateSetting({ thinking: !state.settings.thinking }));
+  $('#thinking-switch')?.addEventListener('click', () => {
+    const meta = currentModel();
+    if (meta?.thinking.mode === 'always') {
+      toast('该模型始终开启思考');
+      return;
+    }
+    updateSetting({ thinking: !state.settings.thinking });
+  });
   $('#json-switch')?.addEventListener('click', () => updateSetting({ json_mode: !state.settings.json_mode }));
   $('#web-search-switch')?.addEventListener('click', () =>
     updateSetting({ web_search: !state.settings.web_search }),
@@ -1686,7 +1957,8 @@ function bindEvents() {
   });
 
   $('#max-tokens')?.addEventListener('change', (event) => {
-    const value = Math.min(393216, Math.max(1, Math.round(Number(event.target.value) || 65536)));
+    const max = currentModel()?.maxOutput || 393_216;
+    const value = Math.min(max, Math.max(1, Math.round(Number(event.target.value) || 65_536)));
     updateSetting({ max_tokens: value });
   });
 
@@ -1801,12 +2073,23 @@ function onDocumentClick(event) {
         scrollToBottom(true);
       },
       attach: () => $('#file-input')?.click(),
-      'toggle-thinking': () => updateSetting({ thinking: !state.settings.thinking }),
-      'toggle-web': () =>
-        updateSetting({
-          web_search: !state.settings.web_search,
-          read_url: !state.settings.web_search,
-        }),
+      'toggle-thinking': () => {
+        const meta = currentModel();
+        if (meta?.thinking.mode === 'always') {
+          toast('该模型始终开启思考');
+          return;
+        }
+        updateSetting({ thinking: !state.settings.thinking });
+      },
+      'toggle-web': () => {
+        const meta = currentModel();
+        if (!meta?.capabilities.webTools) {
+          toast('当前模型不支持 DeepSeek 联网工具');
+          return;
+        }
+        const next = !state.settings.web_search;
+        updateSetting({ web_search: next, read_url: next });
+      },
       'export-md': () => exportConversation('md'),
       'export-json': () => exportConversation('json'),
       import: () => $('#import-input')?.click(),

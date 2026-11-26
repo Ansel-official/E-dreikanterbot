@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 
 /* ------------------------------------------------------------------ */
 /* HTTP helpers                                                        */

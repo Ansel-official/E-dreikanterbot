@@ -1,24 +1,30 @@
 # API 文档
 
-本文对应 **DeepSeek 官方 Chat Completions API**（模型 `deepseek-flash` / `deepseek-v4-pro`）。官方文档：<https://api-docs.deepseek.com/api/create-chat-completion>。
+本文对应 **DeepSeek Chat Completions API** 与 **Kimi（Moonshot）Chat Completions API**。两家都是 OpenAI 兼容协议，但参数约束不同，本项目在 Provider 层做了适配。
+
+- DeepSeek 官方文档：<https://api-docs.deepseek.com/api/create-chat-completion>
+- Kimi 官方文档：<https://platform.kimi.com/docs/api/chat>
 
 E-dreikanterbot 提供两套接口：
 
-1. **原生接口** `/api/*`：给网页使用，事件流更细（思考、工具、用量、标题分开推送）。
-2. **OpenAI 兼容接口** `/v1/*`：给 SDK / 第三方客户端使用，请求与响应格式与官方一致。
+1. **原生接口** `/api/*`：给网页使用，事件流更细（思考、工具、用量、标题分开推送），会自动注入记忆与工具。
+2. **OpenAI 兼容接口** `/v1/*`：给 SDK / 第三方客户端使用，请求与响应格式与官方一致，**不做**记忆注入，纯粹按模型路由。
 
 ---
 
 ## 0. 上游与模型
 
-| 项 | 值 |
-| --- | --- |
-| Base URL | `https://api.deepseek.com` |
-| Chat Completions | `POST /chat/completions` |
-| 模型 | `deepseek-flash`（V4.1 Flash）、`deepseek-v4-pro`（V4 Pro） |
-| 上下文 | 1,000,000 tokens |
-| 最大输出 | 393,216 tokens（384K） |
-| 思考模式 | 默认开启，effort 默认 `high` |
+| 项 | DeepSeek | Kimi（Moonshot） |
+| --- | --- | --- |
+| Base URL | `https://api.deepseek.com` | `https://api.moonshot.cn/v1`（海外 `https://api.moonshot.ai/v1`） |
+| Chat Completions | `POST /chat/completions` | `POST /chat/completions` |
+| 当前模型 | `deepseek-flash`（视觉）、`deepseek-v4-pro` | `kimi-k3.1-pro`、`kimi-k3.1-pro-highspeed`、`kimi-k3`、`kimi-k2.6`（K2.7 已对新人停开） |
+| 上下文 | 1,048,576 | K3：1,048,576；K2：262,144 |
+| 最大输出 | 393,216 | K3：1,048,576（`max_completion_tokens`）；K2：262,144 |
+| 思考 | `thinking` + `reasoning_effort` | K3 始终思考，仅 `reasoning_effort`；K2.6 可开关 |
+| 模型列表 | `GET /models` | `GET /models` |
+
+> 模型与能力以服务端启动时拉取的官方 `/models` 为准；Kimi 的上下文档位来自官方文档内置元数据。
 
 官方计价（美元 / 1M tokens，2026-11 文档）：
 
@@ -28,6 +34,40 @@ E-dreikanterbot 提供两套接口：
 | deepseek-v4-pro | $0.022 / $0.044 | $0.66 / $1.32 | $1.98 / $3.96 |
 
 高峰：UTC 周一至周五 01:00–04:00、06:00–10:00；其余为低峰（节假日未在本地判定）。
+
+---
+
+## 1.5 Provider 适配规则
+
+### DeepSeek
+
+- `thinking: {type: enabled|disabled}`
+- `reasoning_effort: low|high|max`
+- `max_tokens`（1–393216）
+- `temperature` / `top_p` 仅非思考模式生效
+- `safety_check` / `title` / `user_id`
+- `deepseek_web_search` / `deepseek_read_url`
+
+### Kimi
+
+- **K3 系列（kimi-k3.1-pro / highspeed / kimi-k3）**
+  - 始终开启思考与 Preserved Thinking
+  - 只接受顶层 `reasoning_effort: low|high|max`（默认 `max`）
+  - **不要传** `thinking`
+  - 输出上限用 `max_completion_tokens`（默认 131072，最大 1048576）
+  - `temperature` 固定 1.0、`top_p` 固定 0.95，显式传入可能报错
+  - 多轮/工具调用必须回传完整 assistant message（含 `reasoning_content`）
+- **K2.6**
+  - `thinking: {type: enabled|disabled, keep: all|null}`；本项目开启时使用 `keep: "all"`
+  - 关闭思考后不返回 `reasoning_content`
+- **K2.7 Code**
+  - 始终思考，`thinking.type` 只接受 `enabled`，`keep` 按 `all` 处理
+- 缓存：`prompt_cache_key`（本项目传会话 ID），`prompt_tokens_details.cached_tokens` / `cache_write_tokens`
+- 用户标识：`safety_identifier`
+- 没有 `safety_check`、`title`、DeepSeek web tools
+- 视觉：K3 系列支持 `image_url`，还支持 `video_url`
+
+服务端会在 `src/providers.js` 里按上述规则组装请求；前端会按模型能力禁用不适用开关。
 
 ---
 
@@ -146,8 +186,8 @@ curl -N http://localhost:8788/api/chat \
 | GET | `/api/config` | 前端配置（不含密钥） |
 | GET | `/api/session` | 登录状态 |
 | POST | `/api/login` / `/api/logout` | 登录 / 退出 |
-| GET | `/api/models` | 官方模型列表（服务端代查） |
-| GET | `/api/balance` | 官方余额 |
+| GET | `/api/models` | 双 Provider 模型目录（含上下文/最大输出/能力/是否配置 Key） |
+| GET | `/api/balance` | DeepSeek 余额（Kimi 请到 Moonshot 控制台查看） |
 | GET | `/api/files/:name` | 读回上传图片（需登录） |
 
 ---
@@ -175,14 +215,16 @@ curl http://localhost:8788/v1/chat/completions \
 允许透传的字段：
 
 ```text
-model, messages, thinking, reasoning_effort, max_tokens, temperature, top_p,
-stop, response_format, tools, tool_choice, safety_check, title, user_id,
-logprobs, top_logprobs, frequency_penalty, presence_penalty
+model, messages, thinking, reasoning_effort, max_tokens, max_completion_tokens,
+temperature, top_p, stop, response_format, tools, tool_choice, safety_check,
+title, user_id, safety_identifier, prompt_cache_key, logprobs, top_logprobs,
+frequency_penalty, presence_penalty
 ```
 
-- `model` 仅接受 `deepseek-flash` / `deepseek-v4-pro`。
+- `model` 必须是 `/api/models` 返回的 ID；也支持 `kimi/kimi-k3.1-pro`、`deepseek/deepseek-flash` 前缀写法。
 - 非流式请求不会携带 `stream_options`（官方会报 400）。
 - 服务端不会自动注入记忆或工具；这是纯代理，适合 SDK / Agent 使用。
+- Kimi 模型会自动改写参数（`max_completion_tokens`、移除 `thinking`/`temperature`/`top_p`、限制 `stop` 5 个/32 字节）。
 
 ### 3.2 `GET /v1/models`
 
@@ -191,7 +233,7 @@ logprobs, top_logprobs, frequency_penalty, presence_penalty
 ### 3.3 `GET /v1/health`
 
 ```json
-{ "ok": true, "version": "1.0.0", "models": ["deepseek-flash", "deepseek-v4-pro"] }
+{ "ok": true, "version": "1.1.0", "models": ["deepseek-flash", "deepseek-v4-pro", "kimi-k3.1-pro"] }
 ```
 
 ---

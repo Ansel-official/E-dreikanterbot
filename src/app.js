@@ -2,11 +2,12 @@ import http from 'node:http';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 
-import { MODELS, loadConfig, publicConfig } from './config.js';
+import { loadConfig, publicConfig } from './config.js';
 import { ChatService } from './chat.js';
-import { DeepSeekError, chatCompletion, getBalance, listModels, streamChatCompletion } from './deepseek.js';
+import { DeepSeekError, chatCompletion, getBalance, streamChatCompletion } from './deepseek.js';
 import { readAsDataUrl, saveDataUrl, serveAttachment } from './files.js';
 import { PRICING_SOURCE, isPeak } from './pricing.js';
+import { ModelRegistry } from './providers.js';
 import { serveStatic } from './static.js';
 import { ConversationStore, MemoryStore } from './store.js';
 import {
@@ -76,16 +77,18 @@ export async function createApp(overrides = {}) {
   await conversations.init();
   const memory = new MemoryStore({ file: cfg.memoryFile, maxChars: cfg.memory.maxChars });
   await memory.init();
-  const chat = new ChatService({ cfg, conversations, memory });
+  const registry = new ModelRegistry(cfg);
+  await registry.init();
+  const chat = new ChatService({ cfg, conversations, memory, registry });
   const limiter = new RateLimiter();
   const attachmentCache = new Map();
-  const modelsCache = { at: 0, data: null };
 
   const ctx = {
     cfg,
     conversations,
     memory,
     chat,
+    registry,
     limiter,
     async resolveAttachment(attachment) {
       const key = attachment?.file;
@@ -97,22 +100,6 @@ export async function createApp(overrides = {}) {
         if (attachmentCache.size > 24) attachmentCache.delete(attachmentCache.keys().next().value);
       }
       return url;
-    },
-    async models() {
-      if (!cfg.apiKey) return { source: 'static', data: staticModels() };
-      if (modelsCache.data && Date.now() - modelsCache.at < 300_000) return modelsCache;
-      try {
-        const result = await listModels({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, timeoutMs: 15_000 });
-        const ids = new Set(MODELS);
-        const data = (result?.data || [])
-          .filter((m) => ids.has(m.id))
-          .map((m) => ({ ...m, context_length: 1_000_000, max_output_tokens: 393216 }));
-        modelsCache.at = Date.now();
-        modelsCache.data = { source: 'official', data: data.length ? data : staticModels() };
-        return modelsCache.data;
-      } catch {
-        return { source: 'static', data: staticModels() };
-      }
     },
   };
 
@@ -138,7 +125,7 @@ export async function createApp(overrides = {}) {
     await new Promise((resolve) => server.close(() => resolve()));
   }
 
-  return { server, cfg, conversations, memory, chat, close };
+  return { server, cfg, conversations, memory, chat, registry, close };
 }
 
 /* ------------------------------------------------------------------ */
@@ -187,13 +174,15 @@ async function handleApi(req, res, url, ctx) {
   const auth = authState(req, cfg);
 
   if (pathname === '/api/health' && req.method === 'GET') {
+    const catalog = await ctx.registry.snapshot();
     return json(res, 200, {
       ok: true,
       version: VERSION,
       node: process.version,
       uptime: Math.round(process.uptime()),
-      keyConfigured: Boolean(cfg.apiKey),
-      model: cfg.defaultModel,
+      keyConfigured: Boolean(cfg.apiKey || cfg.kimiApiKey),
+      model: ctx.registry.effectiveDefaultModel(),
+      providers: catalog.providers.map(({ id, name, configured, error }) => ({ id, name, configured, error })),
       conversations: ctx.conversations.list().length,
       memory: ctx.memory.stats(),
       icpConfigured: Boolean(cfg.site.icpNumber),
@@ -202,8 +191,9 @@ async function handleApi(req, res, url, ctx) {
   }
 
   if (pathname === '/api/config' && req.method === 'GET') {
+    const catalog = await ctx.registry.snapshot();
     return json(res, 200, {
-      ...publicConfig(cfg),
+      ...publicConfig(cfg, catalog),
       authenticated: auth.authenticated,
       pricing: { source: PRICING_SOURCE, tier: isPeak() ? 'peak' : 'offpeak' },
     });
@@ -248,8 +238,13 @@ async function handleApi(req, res, url, ctx) {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !requireCsrf(req, res)) return;
 
   if (pathname === '/api/models' && req.method === 'GET') {
-    const models = await ctx.models();
-    return json(res, 200, { ...models, pricing: { source: PRICING_SOURCE, tier: isPeak() ? 'peak' : 'offpeak' } });
+    const catalog = await ctx.registry.snapshot();
+    return json(res, 200, {
+      ...catalog,
+      data: catalogModels(catalog),
+      source: cfg.apiKey || cfg.kimiApiKey ? 'official' : 'static',
+      pricing: { source: PRICING_SOURCE, tier: isPeak() ? 'peak' : 'offpeak' },
+    });
   }
 
   if (pathname === '/api/balance' && req.method === 'GET') {
@@ -268,7 +263,7 @@ async function handleApi(req, res, url, ctx) {
 
   if (pathname === '/api/conversations' && req.method === 'POST') {
     const body = await readJson(req, 1024 * 1024);
-    const model = MODELS.includes(body.model) ? body.model : cfg.defaultModel;
+    const model = ctx.registry.resolve(body.model)?.meta.id || ctx.registry.effectiveDefaultModel();
     const doc = await ctx.conversations.create({ title: oneLine(body.title || '新对话', 80), model });
     return json(res, 201, { data: ctx.conversations.meta(doc) });
   }
@@ -365,8 +360,8 @@ async function handleApi(req, res, url, ctx) {
 
 async function handleChat(req, res, ctx) {
   const { cfg, conversations, chat } = ctx;
-  if (!cfg.apiKey) {
-    return fail(res, 503, 'missing_api_key', '服务端未配置 DEEPSEEK_API_KEY，无法发起对话。', '复制 .env.example 为 .env 并填入密钥后重启。');
+  if (!cfg.apiKey && !cfg.kimiApiKey) {
+    return fail(res, 503, 'missing_api_key', '服务端未配置任何上游 API Key（DEEPSEEK_API_KEY / KIMI_API_KEY）。', '复制 .env.example 为 .env 并填入密钥后重启。');
   }
 
   const quota = ctx.limiter.hit(`chat:${clientIp(req, cfg.trustProxy)}`, cfg.rateLimit.chat);
@@ -376,8 +371,32 @@ async function handleChat(req, res, ctx) {
   }
 
   const body = await readJson(req, cfg.maxBodyBytes);
-  const settings = chat.normalizeSettings(body.settings || body);
+  let settings;
+  try {
+    settings = chat.normalizeSettings(body.settings || body);
+  } catch (err) {
+    return fail(res, err.status || 400, err.code || 'invalid_settings', err.message, err.hint || '');
+  }
+  if (!ctx.registry.isConfigured(settings.provider)) {
+    const providerName = settings.modelMeta?.providerName || settings.provider;
+    return fail(
+      res,
+      503,
+      'missing_provider_key',
+      `${providerName} 尚未配置 API Key`,
+      settings.provider === 'kimi' ? '在 .env 设置 KIMI_API_KEY（Moonshot 开放平台）后重启。' : '在 .env 设置 DEEPSEEK_API_KEY 后重启。',
+    );
+  }
   const images = Array.isArray(body.images) ? body.images.filter(Boolean).slice(0, 4) : [];
+  if (images.length && !settings.modelMeta.capabilities.vision) {
+    return fail(
+      res,
+      400,
+      'model_no_vision',
+      `${settings.modelMeta.name} 不支持图片输入`,
+      '请切换到支持视觉的模型（deepseek-flash / kimi-k3 系列）。',
+    );
+  }
   const regenerate = Boolean(body.regenerate);
 
   let conversation = null;
@@ -522,11 +541,18 @@ async function handleV1(req, res, url, ctx) {
   }
 
   if (pathname === '/v1/models' && req.method === 'GET') {
-    return json(res, 200, { object: 'list', data: staticModels() });
+    const catalog = await ctx.registry.snapshot();
+    return json(res, 200, { object: 'list', data: catalogModels(catalog), providers: catalog.providers });
   }
 
   if (pathname === '/v1/health' && req.method === 'GET') {
-    return json(res, 200, { ok: true, version: VERSION, models: MODELS });
+    const catalog = await ctx.registry.snapshot();
+    return json(res, 200, {
+      ok: true,
+      version: VERSION,
+      models: catalog.models.map((model) => model.id),
+      providers: catalog.providers.map(({ id, name, configured }) => ({ id, name, configured })),
+    });
   }
 
   if (pathname === '/v1/chat/completions' && req.method === 'POST') {
@@ -534,14 +560,36 @@ async function handleV1(req, res, url, ctx) {
     if (!Array.isArray(body.messages) || !body.messages.length) {
       return openaiError(res, 400, 'messages 必须是非空数组。', 'invalid_request_error');
     }
-    if (body.model && !MODELS.includes(body.model)) {
-      return openaiError(res, 400, `不支持的模型：${body.model}。可选：${MODELS.join(' / ')}`, 'invalid_request_error');
+
+    const requested = body.model || ctx.registry.effectiveDefaultModel();
+    const resolved = ctx.registry.resolve(requested);
+    if (!resolved) {
+      const catalog = await ctx.registry.snapshot();
+      return openaiError(
+        res,
+        400,
+        `不支持的模型：${requested}。可选：${catalog.models.map((model) => model.id).join(' / ')}`,
+        'invalid_request_error',
+      );
+    }
+    if (!ctx.registry.isConfigured(resolved.provider)) {
+      return openaiError(
+        res,
+        503,
+        `${resolved.meta.providerName} 尚未配置 API Key`,
+        'configuration_error',
+        'missing_provider_key',
+      );
     }
 
-    const payload = pickOpenAIFields(body);
-    payload.model = body.model || cfg.defaultModel;
+    const payload = adaptOpenAIPayload(pickOpenAIFields(body), resolved);
+    payload.model = resolved.meta.id;
 
-    const apiOptions = { apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, timeoutMs: cfg.upstreamTimeoutMs };
+    const apiOptions = {
+      apiKey: ctx.registry.apiKeyFor(resolved.provider),
+      baseUrl: ctx.registry.baseUrlFor(resolved.provider),
+      timeoutMs: cfg.upstreamTimeoutMs,
+    };
 
     if (!body.stream) {
       try {
@@ -568,7 +616,13 @@ async function handleV1(req, res, url, ctx) {
       if (!res.writableEnded && !isAbortError(err)) {
         res.write(
           `data: ${JSON.stringify({
-            error: { message: err.message, type: 'deepseek_error', code: err.code || 'api_error', hint: err.hint || '' },
+            error: {
+              message: err.message,
+              type: 'upstream_error',
+              code: err.code || 'api_error',
+              provider: resolved.provider,
+              hint: err.hint || '',
+            },
           })}\n\n`,
         );
       }
@@ -588,6 +642,7 @@ function pickOpenAIFields(body) {
     'thinking',
     'reasoning_effort',
     'max_tokens',
+    'max_completion_tokens',
     'temperature',
     'top_p',
     'stop',
@@ -597,6 +652,8 @@ function pickOpenAIFields(body) {
     'safety_check',
     'title',
     'user_id',
+    'safety_identifier',
+    'prompt_cache_key',
     'logprobs',
     'top_logprobs',
     'frequency_penalty',
@@ -610,6 +667,52 @@ function pickOpenAIFields(body) {
   return payload;
 }
 
+/** 按 Provider 的官方参数约束调整 OpenAI 兼容请求。 */
+function adaptOpenAIPayload(payload, resolved) {
+  const { provider, meta } = resolved;
+
+  if (provider === 'deepseek') {
+    if (payload.max_completion_tokens !== undefined && payload.max_tokens === undefined) {
+      payload.max_tokens = payload.max_completion_tokens;
+    }
+    delete payload.max_completion_tokens;
+    delete payload.prompt_cache_key;
+    delete payload.safety_identifier;
+    return payload;
+  }
+
+  // Kimi：max_tokens 已弃用；采样参数固定；K3 不接受 thinking。
+  if (payload.max_tokens !== undefined && payload.max_completion_tokens === undefined) {
+    payload.max_completion_tokens = payload.max_tokens;
+  }
+  delete payload.max_tokens;
+  delete payload.temperature;
+  delete payload.top_p;
+  delete payload.frequency_penalty;
+  delete payload.presence_penalty;
+  delete payload.safety_check;
+  delete payload.title;
+
+  if (payload.user_id) {
+    payload.safety_identifier = payload.user_id;
+    delete payload.user_id;
+  }
+  if (meta.thinking.mode === 'always') delete payload.thinking;
+  if (!meta.thinking.efforts.length) delete payload.reasoning_effort;
+
+  if (Array.isArray(payload.stop)) {
+    payload.stop = payload.stop
+      .map((item) => String(item))
+      .filter((item) => item && Buffer.byteLength(item, 'utf8') <= 32)
+      .slice(0, 5);
+    if (!payload.stop.length) delete payload.stop;
+  } else if (typeof payload.stop === 'string') {
+    if (Buffer.byteLength(payload.stop, 'utf8') > 32) payload.stop = payload.stop.slice(0, 32);
+  }
+
+  return payload;
+}
+
 function openaiError(res, status, message, type, code = '') {
   return json(res, status, { error: { message, type, code: code || type, param: null } });
 }
@@ -617,21 +720,24 @@ function openaiError(res, status, message, type, code = '') {
 function openaiUpstreamError(res, err) {
   if (err instanceof DeepSeekError) {
     return json(res, err.status || 502, {
-      error: { message: err.message, type: err.type || 'deepseek_error', code: err.code, hint: err.hint },
+      error: { message: err.message, type: 'upstream_error', code: err.code, hint: err.hint },
     });
   }
   return openaiError(res, 502, err.message || '上游请求失败', 'upstream_error');
 }
 
-function staticModels() {
+function catalogModels(catalog) {
   const created = 1_735_689_600;
-  return MODELS.map((id) => ({
-    id,
+  return (catalog?.models || []).map((model) => ({
+    id: model.id,
     object: 'model',
     created,
-    owned_by: 'deepseek',
-    context_length: 1_000_000,
-    max_output_tokens: 393_216,
+    owned_by: model.provider,
+    name: model.name,
+    context_length: model.contextWindow,
+    max_output_tokens: model.maxOutput,
+    input_modalities: model.inputModalities,
+    capabilities: model.capabilities,
   }));
 }
 
@@ -690,4 +796,4 @@ function safeName(value) {
     .slice(0, 60) || 'conversation';
 }
 
-export { RateLimiter, staticModels };
+export { RateLimiter, catalogModels };

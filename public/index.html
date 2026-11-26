@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>E-dreikanterbot · DeepSeek 原生聊天机器人</title>
-    <meta name="description" content="E-dreikanterbot：按 DeepSeek 官方 API 打造的聊天机器人，支持深度思考、长期记忆库、图片理解、联网搜索与 OpenAI 兼容接口。" />
+    <title>E-dreikanterbot · DeepSeek + Kimi 原生聊天机器人</title>
+    <meta name="description" content="E-dreikanterbot：按 DeepSeek 与 Kimi 官方 API 打造的双 Provider 聊天机器人，支持深度思考、长期记忆库、图片理解、联网搜索与 OpenAI 兼容接口。" />
     <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -14,7 +14,7 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=5" />
+    <link rel="stylesheet" href="/styles.css?v=6" />
   </head>
   <body>
     <svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true">
@@ -57,7 +57,7 @@
           <div class="brand-mark" aria-hidden="true">E<span></span></div>
           <div class="brand-text">
             <strong>E-dreikanterbot</strong>
-            <span>DeepSeek 原生 · 记忆增强</span>
+            <span>DeepSeek + Kimi · 记忆增强</span>
           </div>
           <button class="icon-btn only-mobile" data-action="close-sidebar" aria-label="关闭侧栏">
             <svg class="icon"><use href="#i-x" /></svg>
@@ -179,7 +179,7 @@
         <div class="drawer-head">
           <div>
             <h2>参数与设置</h2>
-            <p>全部直通 DeepSeek 官方参数，改完立即生效</p>
+            <p>DeepSeek / Kimi 官方参数，按模型能力自动适配</p>
           </div>
           <button class="icon-btn" data-action="close-drawer" aria-label="关闭">
             <svg class="icon"><use href="#i-x" /></svg>
@@ -188,24 +188,8 @@
         <div class="drawer-body">
           <section class="field-group">
             <h3>模型</h3>
-            <div class="model-cards" id="model-cards">
-              <label class="model-card">
-                <input type="radio" name="model" value="deepseek-flash" />
-                <span class="model-inner">
-                  <span class="model-name">deepseek-flash</span>
-                  <span class="model-desc">V4.1 Flash · 1M 上下文 · 支持图片</span>
-                  <span class="model-tags"><em>快</em><em>视觉</em></span>
-                </span>
-              </label>
-              <label class="model-card">
-                <input type="radio" name="model" value="deepseek-v4-pro" />
-                <span class="model-inner">
-                  <span class="model-name">deepseek-v4-pro</span>
-                  <span class="model-desc">V4 Pro · 1M 上下文 · 更强推理</span>
-                  <span class="model-tags"><em>强</em><em>贵</em></span>
-                </span>
-              </label>
-            </div>
+            <div class="model-list" id="model-list"></div>
+            <div class="model-meta" id="model-meta"></div>
           </section>
 
           <section class="field-group">
@@ -228,9 +212,10 @@
               <button type="button" data-tokens="65536">64K</button>
               <button type="button" data-tokens="131072">128K</button>
               <button type="button" data-tokens="393216">384K</button>
+              <button type="button" data-tokens="1048576">1M</button>
             </div>
-            <input class="text-input" id="max-tokens" type="number" min="1" max="393216" step="1" />
-            <p class="hint">官方上限 393216（384K）。实际消耗以 API 返回的 usage 为准。</p>
+            <input class="text-input" id="max-tokens" type="number" min="1" max="1048576" step="1" />
+            <p class="hint" id="max-tokens-hint">官方上限 393216（384K）。实际消耗以 API 返回的 usage 为准。</p>
           </section>
 
           <section class="field-group">
@@ -275,7 +260,7 @@
               <button type="button" data-safety="high">high（公共服务）</button>
               <button type="button" data-safety="low">low（默认）</button>
             </div>
-            <p class="hint">面向公众提供服务时，请保持 high 并落实内容审核、生成式 AI 备案与标识义务。</p>
+            <p class="hint" id="safety-hint">面向公众提供服务时，请保持 high 并落实内容审核、生成式 AI 备案与标识义务。</p>
           </section>
 
           <section class="field-group">
@@ -347,6 +332,6 @@
       <input type="file" id="import-input" accept="application/json,.json" hidden />
     </div>
 
-    <script type="module" src="/app.js?v=6"></script>
+    <script type="module" src="/app.js?v=8"></script>
   </body>
 </html>

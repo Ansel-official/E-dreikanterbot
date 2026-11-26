@@ -97,6 +97,82 @@ export async function startMock({ port = 0, host = '127.0.0.1' } = {}) {
       });
     }
 
+    if (req.method === 'GET' && url.pathname === '/kimi/v1/models') {
+      return sendJson(res, 200, {
+        object: 'list',
+        data: [
+          { id: 'kimi-k3.1-pro', object: 'model', owned_by: 'moonshot' },
+          { id: 'kimi-k3', object: 'model', owned_by: 'moonshot' },
+          { id: 'kimi-k2.6', object: 'model', owned_by: 'moonshot' },
+        ],
+      });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/kimi/v1/chat/completions') {
+      let body;
+      try {
+        body = JSON.parse((await readBody(req)) || '{}');
+      } catch {
+        return sendJson(res, 400, { error: { message: 'invalid json' } });
+      }
+      const text = lastUserText(body.messages);
+      const kimiAnswer = /能力|介绍|你是谁|可以做什么/.test(text)
+        ? [
+            '你好，我是 **Kimi K3.1 Pro**（本地 demo 模拟）。',
+            '',
+            'Kimi 的 K3 系列与 DeepSeek 的参数习惯不同：',
+            '',
+            '- 始终开启思考，用顶层 `reasoning_effort` 调节强度，不接受 `thinking`',
+            '- 输出上限用 `max_completion_tokens`，最高 1M',
+            '- `temperature` / `top_p` 固定，不应显式传入',
+            '- 缓存会返回 `prompt_tokens_details.cache_write_tokens`',
+            '',
+            '```json',
+            '{"model":"kimi-k3.1-pro","reasoning_effort":"max","max_completion_tokens":131072}',
+            '```',
+          ].join('\n')
+        : '你好，我是 Kimi K3.1 Pro（demo 模拟）。当前是本地 mock 上游，不会产生真实费用。';
+      const reasoning = 'Kimi 正在思考：识别到这是一次演示请求，需要展示 K3 系列的思考流与回答。';
+      const usage = {
+        prompt_tokens: 108,
+        completion_tokens: 36,
+        total_tokens: 144,
+        cached_tokens: 32,
+        prompt_tokens_details: { cached_tokens: 32, cache_write_tokens: 12 },
+      };
+      const base = { id: 'chatcmpl_kimi_demo', object: 'chat.completion.chunk', created: 1_764_000_000, model: body.model };
+
+      if (body.stream === false) {
+        return sendJson(res, 200, {
+          id: 'chatcmpl_kimi_demo',
+          object: 'chat.completion',
+          created: 1_764_000_000,
+          model: body.model,
+          choices: [{ index: 0, message: { role: 'assistant', content: kimiAnswer, reasoning_content: reasoning }, finish_reason: 'stop' }],
+          usage,
+        });
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      });
+      const send = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      for (const piece of reasoning.match(/[\s\S]{1,16}/g) || []) {
+        send({ ...base, choices: [{ index: 0, delta: { reasoning_content: piece } }] });
+        await delay(16);
+      }
+      for (const piece of kimiAnswer.match(/[\s\S]{1,12}/g) || []) {
+        send({ ...base, choices: [{ index: 0, delta: { content: piece } }] });
+        await delay(20);
+      }
+      send({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+      send({ ...base, choices: [], usage });
+      res.write('data: [DONE]\n\n');
+      return res.end();
+    }
+
     if (req.method === 'POST' && url.pathname === '/chat/completions') {
       let body;
       try {

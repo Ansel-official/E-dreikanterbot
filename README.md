@@ -1,11 +1,12 @@
 # E-dreikanterbot
 
-**按 DeepSeek 官方 API 原样打造的聊天机器人**：零依赖、单命令启动、全设备自适应，自带长期记忆库与 OpenAI 兼容接口。
+**DeepSeek + Kimi 双 Provider 聊天机器人**：按两家官方 API 文档适配、零依赖、单命令启动、全设备自适应，自带长期记忆库与 OpenAI 兼容接口。
 
 [![CI](https://github.com/Ansel-official/E-dreikanterbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Ansel-official/E-dreikanterbot/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-4d6bfe.svg)](https://github.com/Ansel-official/E-dreikanterbot/releases)
 
 ![桌面端](docs/screens/desktop-answer.png)
 
@@ -13,17 +14,19 @@
 
 ## 这是什么
 
-一个可以直接部署的 DeepSeek 聊天机器人，不是套壳：
+一个可以直接部署的双上游聊天机器人，不是套壳：
 
-- **官方参数直通**：`thinking` / `reasoning_effort` / `max_tokens`（最高 393216）/ `temperature` / `top_p` / `stop` / `response_format` / `tools` / `safety_check` / `title` / `user_id`
-- **原样解析官方流**：`reasoning_content` 思考链、`usage`（含缓存命中）、`finish_reason`、官方错误码
+- **双 Provider，所有模型**：DeepSeek 与 Kimi（Moonshot）官方 `/models` 动态发现；模型列表、上下文、最大输出、视觉/思考/工具能力全部来自官方元数据或官方文档
+- **DeepSeek 官方参数直通**：`thinking` / `reasoning_effort` / `max_tokens`（最高 393216）/ `temperature` / `top_p` / `stop` / `response_format` / `tools` / `safety_check` / `title` / `user_id`
+- **Kimi 官方参数适配**：K3 系列始终思考，使用顶层 `reasoning_effort`；输出用 `max_completion_tokens`（最高 1M）；`prompt_cache_key`、`safety_identifier`、`cache_write_tokens` 均已适配；不会误传 `thinking` / `temperature` / `top_p`
+- **原样解析官方流**：`reasoning_content` 思考链、`usage`（缓存命中/写入）、`finish_reason`、官方错误码
 - **长期记忆库**：本地 BM25 检索 + Top-K 注入；模型可通过 `remember_fact` / `recall_memory` 工具主动读写
-- **图片理解**：支持 JPG / PNG / WebP / GIF，按官方 `image_url` 多模态格式发送
-- **OpenAI 兼容接口**：`/v1/chat/completions`、`/v1/models`，任何 OpenAI SDK / 客户端都能接
+- **图片理解**：支持 JPG / PNG / WebP / GIF，按官方 `image_url` 多模态格式发送（按模型能力校验）
+- **OpenAI 兼容接口**：`/v1/chat/completions`、`/v1/models`，按模型自动路由到 DeepSeek 或 Kimi
 - **全设备自适应**：桌面三栏、平板抽屉、手机底部输入；PWA 可安装、离线壳、安全区适配
 - **零依赖**：没有 `npm install`，没有构建步骤，`node server.js` 即启动
 
-> 默认模型 `deepseek-flash`（V4.1 Flash，1M 上下文，支持视觉）；可选 `deepseek-v4-pro`（更强推理）。
+> 默认 `deepseek-flash`（V4.1 Flash，1M 上下文，支持视觉）；可切换到 `deepseek-v4-pro` 或 Kimi `kimi-k3.1-pro` / `kimi-k3.1-pro-highspeed` / `kimi-k3` / `kimi-k2.6`。
 
 ---
 
@@ -35,16 +38,23 @@
 git clone https://github.com/Ansel-official/E-dreikanterbot.git
 cd E-dreikanterbot
 cp .env.example .env        # Windows: copy .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY
+# 编辑 .env，填入 DEEPSEEK_API_KEY 和/或 KIMI_API_KEY
 node server.js
 ```
 
 打开 <http://localhost:8788>。
 
+两个 Key 至少配一个：
+
+```dotenv
+DEEPSEEK_API_KEY=sk-...          # DeepSeek 开放平台
+KIMI_API_KEY=sk-...              # Moonshot 开放平台（Kimi）
+```
+
 没有 API Key 也能先看界面：
 
 ```bash
-node demo/dev.js            # 本地 mock 上游，不调用真实 API、不产生费用
+node demo/dev.js            # 本地 mock 上游（DeepSeek + Kimi），不调用真实 API、不产生费用
 # http://127.0.0.1:8789
 ```
 
@@ -57,29 +67,43 @@ node scripts/check.js
 真实链路自测（会产生极少量费用，默认 256 tokens 输出）：
 
 ```bash
-node scripts/smoke.js
+node scripts/smoke.js                          # 默认模型
+node scripts/smoke.js deepseek-flash "你好"
+node scripts/smoke.js kimi-k3.1-pro "你好"     # 需配置 KIMI_API_KEY
 ```
 
 ---
 
 ## 它和官方 API 的对应关系
 
-| 官方能力 | 本项目实现 |
-| --- | --- |
-| `POST /chat/completions` | 服务端 `src/deepseek.js`，流式 + 非流式 |
-| `thinking: {type}` / `reasoning_effort` | 参数面板「深度思考」+ low/high/max |
-| `max_tokens` 1–393216 | 8K / 64K / 128K / 384K 预设与「参数拉满」 |
-| `reasoning_content` | 可折叠思考面板，实时流式显示 |
-| `usage` / 缓存字段 | 输入、输出、缓存命中率、费用估算 |
-| 上下文缓存 | 稳定 system 前缀 + 记忆按写入时间排序，尽量命中 |
-| `deepseek_web_search` / `deepseek_read_url` | 「联网搜索」「读取链接」开关 |
-| 图片输入 `image_url` | 粘贴、拖拽、相册上传，自动压缩到 1600px |
-| `title` 扩展 | 自动命名会话，可手动覆盖 |
-| `safety_check` | 默认 high，可在参数面板切换 |
-| `finish_reason` / 错误码 | 前端错误卡片 + 官方提示与重试建议 |
-| OpenAI 兼容 | `/v1/chat/completions`、`/v1/models` |
+| 官方能力 | DeepSeek | Kimi |
+| --- | --- | --- |
+| `POST /chat/completions` | ✅ 流式 + 非流式 | ✅ 流式 + 非流式 |
+| 思考开关 | `thinking: {type}` | K3 不支持，始终思考；K2.6 支持 |
+| 思考强度 | `reasoning_effort` low/high/max | K3 支持 low/high/max（默认 max） |
+| 最大输出 | `max_tokens` ≤ 393216 | `max_completion_tokens` ≤ 1048576 |
+| 思考内容 | `reasoning_content` | `reasoning_content` + Preserved Thinking |
+| 采样参数 | `temperature` / `top_p` | 固定 1.0 / 0.95，不发送 |
+| 缓存 | `prompt_cache_hit_tokens` / `miss` | `prompt_tokens_details.cached_tokens` / `cache_write_tokens` |
+| 联网工具 | `deepseek_web_search` / `deepseek_read_url` | 不提供；UI 自动禁用 |
+| 图片输入 | `image_url` | `image_url` / `video_url`（K3 系列） |
+| 会话标题 | `title` 扩展 | 不支持，使用本地标题 |
+| 内容安全 | `safety_check` | `safety_identifier` |
+| 用户标识 | `user_id` | `safety_identifier` / `prompt_cache_key` |
+| OpenAI 兼容 | `/v1/chat/completions` | 同一入口，按模型路由 |
 
-参数含义、取值范围与「哪些参数会被官方忽略」见 [docs/API.md](docs/API.md)。
+参数含义、模型能力与「哪些参数会被官方忽略」见 [docs/API.md](docs/API.md)。
+
+### 模型选择
+
+模型列表不是写死的：服务端启动时会分别请求两家的 `GET /models`，合并为统一目录；Kimi 未配置 Key 时仍会展示官方模型，但标记为不可选。
+
+| Provider | 当前模型 |
+| --- | --- |
+| DeepSeek | `deepseek-flash`（视觉）、`deepseek-v4-pro`（文本强推理） |
+| Kimi | `kimi-k3.1-pro`、`kimi-k3.1-pro-highspeed`、`kimi-k3`、`kimi-k2.7-code`*、`kimi-k2.6`* |
+
+\* K2.7 / K2.6 已对新人停止开放，是否可用以 `/models` 返回为准，UI 会标注「即将下线」。
 
 ---
 
@@ -97,7 +121,7 @@ node scripts/smoke.js
 | --- | --- |
 | ![手机](docs/screens/mobile-empty.png) | ![平板](docs/screens/tablet-empty.png) |
 
-> 截图为内置演示模式（本地 mock 上游）录制，所以对话里会出现「这是演示回复」的提示；填入真实 `DEEPSEEK_API_KEY` 后，回答由 DeepSeek 生成。
+> 截图为内置演示模式（DeepSeek + Kimi 本地 mock）录制；填入真实 Key 后，回答由对应官方 API 生成。
 
 ---
 
@@ -133,15 +157,16 @@ curl -N http://localhost:8788/api/chat \
   -d '{
     "message": "用一句话解释量子纠缠",
     "settings": {
-      "model": "deepseek-flash",
-      "thinking": true,
+      "model": "kimi-k3.1-pro",
       "reasoning_effort": "high",
       "max_tokens": 4096
     }
   }'
 ```
 
-SSE 事件：`meta` → `reasoning` / `content` / `tool` → `usage` → `title` → `done`，错误为 `error`。
+换成 `deepseek-flash` 时，可额外传 `thinking` / `safety_check` / `title`；服务端会按模型自动只发送该 Provider 支持的参数。
+
+SSE 事件：`meta` → `reasoning` / `content` / `tool` → `usage` → `title` → `done`，错误为 `error`。`meta` 会带上 `provider`、`providerName`、`contextWindow`。
 
 ### OpenAI 兼容接口
 
@@ -167,11 +192,13 @@ from openai import OpenAI
 
 client = OpenAI(api_key="<ACCESS_TOKEN>", base_url="http://localhost:8788/v1")
 resp = client.chat.completions.create(
-    model="deepseek-flash",
+    model="kimi-k3.1-pro",  # 或 deepseek-flash
     messages=[{"role": "user", "content": "你好"}],
 )
 print(resp.choices[0].message.content)
 ```
+
+`/v1` 会按 `model` 自动选择 Provider，并改写参数（Kimi 用 `max_completion_tokens`，移除 `thinking`/`temperature`/`top_p`）。也可以用 `kimi/kimi-k3.1-pro` 这种带 Provider 前缀的写法。
 
 完整接口、参数与错误码：[docs/API.md](docs/API.md)。
 
@@ -179,10 +206,11 @@ print(resp.choices[0].message.content)
 
 ## 配置
 
-全部通过 `.env`（或环境变量）配置，最少只需要一项：
+全部通过 `.env`（或环境变量）配置，至少配置一个上游 Key：
 
 ```dotenv
-DEEPSEEK_API_KEY=sk-...
+DEEPSEEK_API_KEY=sk-...   # 二选一或都配
+KIMI_API_KEY=sk-...
 ```
 
 常用项：
@@ -191,12 +219,15 @@ DEEPSEEK_API_KEY=sk-...
 | --- | --- | --- |
 | `PORT` | `8788` | 监听端口 |
 | `HOST` | `0.0.0.0` | 监听地址 |
-| `DEFAULT_MODEL` | `deepseek-flash` | 默认模型 |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek Key |
+| `KIMI_API_KEY` | 空 | Kimi / Moonshot Key |
+| `KIMI_BASE_URL` | `https://api.moonshot.cn/v1` | 海外可改 `https://api.moonshot.ai/v1` |
+| `DEFAULT_MODEL` | `deepseek-flash` | 默认模型（必须是 `/api/models` 中的 ID） |
 | `ACCESS_TOKEN` | 空 | 对外访问密码；公网部署**必须**设置 |
 | `MEMORY_ENABLED` | `true` | 是否启用记忆库 |
 | `MEMORY_TOP_K` | `8` | 每轮注入记忆条数 |
-| `MAX_CONTEXT_TOKENS` | `900000` | 历史预算 |
-| `SAFETY_LEVEL` | `high` | 官方内容安全等级 |
+| `MAX_CONTEXT_TOKENS` | `900000` | 历史预算（按模型上下文再收窄） |
+| `SAFETY_LEVEL` | `high` | 仅 DeepSeek 的内容安全等级 |
 | `DEFAULT_MAX_TOKENS` | `65536` | 默认最大输出 |
 | `ICP_NUMBER` | 空 | 备案号，显示在页脚 |
 | `POLICE_NUMBER` | 空 | 公安联网备案号 |
@@ -238,16 +269,18 @@ DEEPSEEK_API_KEY=sk-...
 node tests/run.js
 ```
 
-当前 **36 项**测试，覆盖：
+当前 **39 项**测试，覆盖：
 
 - SSE 跨块 / CRLF / 多行 data 解析
 - 会话持久化、重新生成、导入导出
 - 记忆去重、中文分词、BM25 检索、缓存友好的排序
-- 官方参数组装（thinking / max_tokens / safety_check / title / user_id）
+- DeepSeek 参数组装（thinking / max_tokens / safety_check / title / user_id）
+- Kimi K3 参数适配（reasoning_effort / max_completion_tokens / 无 thinking / 无采样参数）
+- Kimi 缓存写入用量、视觉能力按模型校验
 - 工具调用两轮循环与 `reasoning_content` 回传
 - 图片校验、附件回读
 - 鉴权、CSRF、限流、路径穿越、安全响应头
-- `/v1` 流式与非流式、错误码映射、CORS
+- `/v1` 双 Provider 路由、流式与非流式、错误码映射、CORS
 
 测试不需要 API Key，使用本地 mock 上游。
 
@@ -260,8 +293,9 @@ E-dreikanterbot/
 ├─ server.js              # 启动入口
 ├─ src/
 │  ├─ app.js              # HTTP 路由、鉴权、SSE、/v1
-│  ├─ chat.js             # 对话编排、工具循环、持久化
-│  ├─ deepseek.js         # 官方 API 客户端、SSE 解析、错误码
+│  ├─ deepseek.js         # 通用上游客户端、SSE 解析、错误码
+│  ├─ providers.js        # DeepSeek / Kimi 模型目录与能力适配
+│  ├─ chat.js             # 对话编排、工具循环、Provider 参数
 │  ├─ context.js          # 上下文拼装与裁剪
 │  ├─ store.js            # 会话存储 + 长期记忆 + BM25
 │  ├─ files.js            # 图片校验与附件
@@ -270,7 +304,7 @@ E-dreikanterbot/
 │  └─ static.js           # 静态资源（ETag/gzip）
 ├─ public/                # 零构建前端
 ├─ demo/                  # mock 上游 + 演示模式
-├─ tests/                 # 36 项测试
+├─ tests/                 # 39 项测试
 ├─ docs/                  # API / 记忆库 / 部署 / ICP / 设备
 └─ scripts/               # 预检、smoke、图标生成
 ```
@@ -301,4 +335,4 @@ E-dreikanterbot/
 
 [MIT](LICENSE) © 2026 Ansel
 
-本项目与 DeepSeek 官方无隶属关系；DeepSeek、DeepSeek API 是其权利人商标。使用 API 需遵守 [DeepSeek 开放平台服务条款](https://cdn.deepseek.com/policies/zh-CN/deepseek-open-platform-terms-of-service.html)。
+本项目与 DeepSeek、Moonshot AI 官方均无隶属关系；DeepSeek、Kimi 是其权利人商标。使用 API 需遵守 [DeepSeek 开放平台服务条款](https://cdn.deepseek.com/policies/zh-CN/deepseek-open-platform-terms-of-service.html) 与 [Kimi 开放平台服务条款](https://platform.kimi.com/docs/agreements)。

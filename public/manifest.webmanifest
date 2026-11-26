@@ -1,7 +1,7 @@
 {
   "name": "E-dreikanterbot",
   "short_name": "E-dreikanterbot",
-  "description": "按 DeepSeek 官方 API 打造的聊天机器人：深度思考、长期记忆、图片理解、联网搜索与 OpenAI 兼容接口。",
+  "description": "按 DeepSeek 与 Kimi 官方 API 打造的双 Provider 聊天机器人：深度思考、长期记忆、图片理解、联网搜索与 OpenAI 兼容接口。",
   "lang": "zh-CN",
   "dir": "ltr",
   "id": "/",

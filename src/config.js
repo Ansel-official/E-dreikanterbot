@@ -6,7 +6,16 @@ import { ensureDirSync } from './util.js';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-export const MODELS = ['deepseek-flash', 'deepseek-v4-pro'];
+export const DEEPSEEK_MODELS = ['deepseek-flash', 'deepseek-v4-pro'];
+export const KIMI_MODELS = [
+  'kimi-k3.1-pro',
+  'kimi-k3.1-pro-highspeed',
+  'kimi-k3',
+  'kimi-k2.7-code',
+  'kimi-k2.7-code-highspeed',
+  'kimi-k2.6',
+];
+export const MODELS = [...DEEPSEEK_MODELS, ...KIMI_MODELS];
 export const EFFORTS = ['none', 'low', 'high', 'max'];
 
 export const DEFAULT_SYSTEM_PROMPT = [
@@ -108,6 +117,8 @@ export function loadConfig(overrides = {}) {
 
     apiKey: text(process.env.DEEPSEEK_API_KEY),
     baseUrl: text(process.env.DEEPSEEK_BASE_URL, 'https://api.deepseek.com').replace(/\/+$/, ''),
+    kimiApiKey: text(process.env.KIMI_API_KEY) || text(process.env.MOONSHOT_API_KEY),
+    kimiBaseUrl: text(process.env.KIMI_BASE_URL, 'https://api.moonshot.cn/v1').replace(/\/+$/, ''),
     defaultModel: MODELS.includes(text(process.env.DEFAULT_MODEL)) ? text(process.env.DEFAULT_MODEL) : MODELS[0],
 
     accessToken,
@@ -176,11 +187,21 @@ export function loadConfig(overrides = {}) {
 }
 
 /** 只暴露给浏览器的安全字段，绝不包含 apiKey / sessionSecret / accessToken。 */
-export function publicConfig(cfg) {
+export function publicConfig(cfg, catalog = null) {
+  const models = catalog?.models || [];
+  const providers = catalog?.providers || [];
+  const configured = new Set(providers.filter((provider) => provider.configured).map((provider) => provider.id));
+  const defaultModel =
+    models.find((model) => model.id === cfg.defaultModel && configured.has(model.provider))?.id ||
+    models.find((model) => configured.has(model.provider))?.id ||
+    cfg.defaultModel;
+
   return {
     site: cfg.site,
-    models: MODELS,
-    defaultModel: cfg.defaultModel,
+    version: '1.1.0',
+    providers,
+    models,
+    defaultModel,
     defaults: {
       thinking: cfg.generation.thinking,
       reasoningEffort: cfg.generation.reasoningEffort,
@@ -193,12 +214,13 @@ export function publicConfig(cfg) {
       memory: cfg.memory.enabled,
     },
     limits: {
-      maxTokens: 393216,
+      maxTokens: Math.max(393_216, ...models.map((model) => Number(model.maxOutput) || 0)),
       minTokens: 1,
-      maxContextTokens: cfg.context.maxTokens,
+      maxContextTokens: Math.max(cfg.context.maxTokens, ...models.map((model) => Number(model.contextWindow) || 0)),
       maxBodyBytes: cfg.maxBodyBytes,
       maxImages: 4,
-      maxImageBytes: 8 * 1024 * 1024,    },
+      maxImageBytes: 8 * 1024 * 1024,
+    },
     features: {
       memory: cfg.memory.enabled,
       vision: true,
@@ -206,8 +228,10 @@ export function publicConfig(cfg) {
       title: cfg.titleEnabled,
       api: true,
       login: Boolean(cfg.accessToken),
-      keyConfigured: Boolean(cfg.apiKey),
+      keyConfigured: Boolean(cfg.apiKey || cfg.kimiApiKey),
+      deepseekConfigured: Boolean(cfg.apiKey),
+      kimiConfigured: Boolean(cfg.kimiApiKey),
     },
-    version: '1.0.0',
+    warnings: catalog?.warnings || [],
   };
 }

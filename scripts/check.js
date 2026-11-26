@@ -25,7 +25,9 @@ try {
 }
 
 if (cfg) {
-  check('DEEPSEEK_API_KEY', Boolean(cfg.apiKey), cfg.apiKey ? `已配置（${cfg.apiKey.slice(0, 6)}…）` : '缺失，无法对话');
+  check('DEEPSEEK_API_KEY', Boolean(cfg.apiKey), cfg.apiKey ? `已配置（${cfg.apiKey.slice(0, 6)}…）` : '未配置（Kimi 也可以单独使用）', false);
+  check('KIMI_API_KEY', Boolean(cfg.kimiApiKey), cfg.kimiApiKey ? '已配置（Moonshot）' : '未配置（仅禁用 Kimi 模型）', false);
+  check('至少一个上游 Key', Boolean(cfg.apiKey || cfg.kimiApiKey), cfg.apiKey || cfg.kimiApiKey ? '对话可用' : '缺失，无法对话');
   check('数据目录可写', canWrite(cfg.dataDir), cfg.dataDir);
   check('公网访问保护', !(cfg.host === '0.0.0.0' && !cfg.accessToken), cfg.accessToken ? '已设置 ACCESS_TOKEN' : '监听 0.0.0.0 但未设置 ACCESS_TOKEN', false);
   check('ICP 备案号', Boolean(cfg.site.icpNumber), cfg.site.icpNumber || '未配置（公网部署前需完成备案）', false);
