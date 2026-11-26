@@ -1,0 +1,61 @@
+name: release
+
+# 推 v* 标签时自动打包并发布 Release（内含可直接下载的 zip）
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 语法检查
+        run: |
+          node --check server.js
+          node --check src/app.js
+
+      - name: 打包（排除 node_modules / .git / 测试产物）
+        run: |
+          mkdir -p dist
+          zip -r "dist/E-dreikanterbot-${GITHUB_REF_NAME#v}.zip" . \
+            -x 'node_modules/*' -x '.git/*' -x 'dist/*' -x '*.log' -x '.env'
+          ls -lh dist
+
+      - name: 生成 SHA256
+        run: |
+          cd dist && sha256sum *.zip > SHA256SUMS && cat SHA256SUMS
+
+      - name: 发布
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS
+          generate_release_notes: true
+          body: |
+            ## 怎么用（Windows / macOS / Linux 都行）
+
+            1. 解压 zip
+            2. 在目录里 `cp .env.example .env`（没有该文件就直接新建 `.env`），填入
+               `DEEPSEEK_API_KEY=sk-...`（可选再填 `KIMI_API_KEY=...`）
+            3. `node server.js`
+            4. 浏览器打开终端里打印的地址（会同时给出局域网地址）
+
+            ## 手机上用（安卓 / 鸿蒙 4 / 鸿蒙 NEXT）
+
+            让手机和电脑连**同一个 Wi-Fi**，在手机浏览器里打开终端打印的
+            `http://<你的电脑内网IP>:端口`（例如 `http://192.168.1.10:8788`），
+            菜单选「添加到桌面」即可当 App 用。
+
+            > 打不开多半是 Windows 防火墙拦了。用管理员 PowerShell 执行一次：
+            > `netsh advfirewall firewall add rule name="E-dreikanterbot" dir=in action=allow protocol=TCP localport=8788`
