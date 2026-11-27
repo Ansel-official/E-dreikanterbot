@@ -198,7 +198,7 @@ export function publicConfig(cfg, catalog = null) {
 
   return {
     site: cfg.site,
-    version: '2.1.0-R',
+    version: '2.2.0',
     providers,
     models,
     defaultModel,

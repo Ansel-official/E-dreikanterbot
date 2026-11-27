@@ -1,16 +1,16 @@
 # E-dreikanterbot
 
-**V2.1.R：对齐 DeepSeek 官方 chat-demo 的聊天体验 + DeepSeek / Kimi 双 Provider + 本地长期记忆库**。零依赖、单命令启动、全设备自适应，聊天记录与分支可持久续聊。
+**V2.2：更简洁高效的 DeepSeek / Kimi 聊天界面**。模型切换与推理强度滑条收进输入框下方，顶栏和空场做减法；零依赖、单命令启动，保留长期记忆、消息分支与继续聊。
 
 [![CI](https://github.com/Ansel-official/E-dreikanterbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Ansel-official/E-dreikanterbot/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Dependencies](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](package.json)
-[![Version](https://img.shields.io/badge/version-2.1.0--R-4d6bfe.svg)](https://github.com/Ansel-official/E-dreikanterbot/releases)
+[![Version](https://img.shields.io/badge/version-2.2.0-4d6bfe.svg)](https://github.com/Ansel-official/E-dreikanterbot/releases)
 
-![消息分支](docs/screens/v21-branches.png)
+![桌面端](docs/screens/v22-chat.png)
 
-> 参考官方 [chat-demo](https://github.com/deepseek-ai/chat-demo)（MIT）的功能设计，用零依赖 vanilla + Node 重新实现，并扩展了双 Provider 与服务端记忆库；不是直接复制其 React 代码。
+> 参考官方 [chat-demo](https://github.com/deepseek-ai/chat-demo)（MIT）的功能设计，用零依赖 vanilla + Node 重新实现，并扩展了双 Provider 与服务端记忆库；不是直接复制其 React 代码。V2.2 的布局参考 Codex / DSH 的克制风格。
 
 ---
 
@@ -34,7 +34,20 @@
 
 ---
 
-## V2.1.R 新增
+## V2.2：界面做减法
+
+| 改动 | 说明 |
+| --- | --- |
+| 底部模型切换 | 输入框下方直接打开模型面板，不再需要进设置抽屉 |
+| 推理强度滑条 | 关闭 / 快速 / 均衡 / 深入，随当前模型支持的能力自动收口 |
+| 顶栏精简 | 只留标题、主题、更多；记忆库/设置/导入导出收进菜单 |
+| 空场收敛 | 一句问题 + 四个胶囊入口，去掉大段说明与参数按钮 |
+| 对话优先 | 隐藏头像旁的名字/时间，用量只留一行小字；操作按钮悬停出现 |
+| 无衬线 | 全局无衬线字体，等宽只用于代码和数字 |
+| 高级参数 | 采样、工具、安全收进可折叠区域，默认不打扰 |
+| 视觉 | 中性黑白底 + 单一蓝色强调，去掉渐变光晕与重阴影 |
+
+## V2.1.R 能力（保留）
 
 | 能力 | 说明 |
 | --- | --- |
@@ -52,7 +65,7 @@
 
 ### 与官方 chat-demo 的对照
 
-| 能力 | 官方 chat-demo | 本项目 V2.1.R |
+| 能力 | 官方 chat-demo | 本项目 V2.2 |
 | --- | --- | --- |
 | 多会话 / 自动标题 / 重命名删除 | ✅ | ✅ |
 | 编辑提问 / 重新生成 / 消息分支 | ✅ | ✅ |
@@ -151,17 +164,21 @@ node scripts/smoke.js kimi-k3.1-pro "你好"     # 需配置 KIMI_API_KEY
 
 ## 截图
 
+| 桌面端 | 模型与推理强度 |
+| --- | --- |
+| ![桌面端](docs/screens/v22-chat.png) | ![模型选择](docs/screens/v22-model-picker.png) |
+
+| 空场 | 深色模式 |
+| --- | --- |
+| ![空场](docs/screens/v22-empty.png) | ![深色](docs/screens/v22-dark.png) |
+
 | 消息分支 / 编辑重新生成 | 文本附件 / 网页读取 |
 | --- | --- |
 | ![分支](docs/screens/v21-branches.png) | ![附件](docs/screens/v21-attachments.png) |
 
-| 桌面端 | 深色模式 |
+| 参数抽屉 | 手机端 |
 | --- | --- |
-| ![桌面端](docs/screens/desktop-empty.png) | ![深色](docs/screens/desktop-dark.png) |
-
-| 记忆库 | 参数面板 |
-| --- | --- |
-| ![记忆库](docs/screens/desktop-memory.png) | ![参数](docs/screens/desktop-settings.png) |
+| ![参数](docs/screens/v22-settings.png) | ![手机](docs/screens/v22-mobile-picker.png) |
 
 | 手机端 | 平板端 |
 | --- | --- |

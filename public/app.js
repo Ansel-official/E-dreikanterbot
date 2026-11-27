@@ -405,8 +405,22 @@ function parseStop(value) {
     .slice(0, 16);
 }
 
+const MODEL_ORDER = {
+  'deepseek-flash': 0,
+  'deepseek-v4-pro': 1,
+  'kimi-k3.1-pro': 0,
+  'kimi-k3': 1,
+  'kimi-k2.7-code': 2,
+  'kimi-k2.7-code-highspeed': 3,
+  'kimi-k2.6': 4,
+};
+
+function modelOrder(a, b) {
+  return (MODEL_ORDER[a] ?? 99) - (MODEL_ORDER[b] ?? 99) || String(a).localeCompare(String(b));
+}
+
 function renderModelList() {
-  const host = $('#model-list');
+  const host = $('#model-picker-list');
   if (!host) return;
   const providers = state.config?.providers || [];
   if (!providers.length) {
@@ -417,41 +431,36 @@ function renderModelList() {
   host.innerHTML = '';
   for (const provider of providers) {
     const group = document.createElement('div');
-    group.className = 'model-group';
+    group.className = 'model-pick-group';
     const head = document.createElement('div');
-    head.className = 'model-group-head';
+    head.className = 'model-pick-provider';
     head.innerHTML =
-      `<strong>${escapeHtml(provider.name)}</strong>` +
-      `<span class="model-status ${provider.configured ? '' : 'off'}" title="${escapeHtml(provider.error || provider.keyHint || '')}">` +
-      `${provider.configured ? (provider.error ? '列表降级' : '已配置') : '未配置 Key'}</span>`;
+      `<span>${escapeHtml(provider.name)}</span>` +
+      `<span class="model-pick-status ${provider.configured ? '' : 'off'}">` +
+      `${provider.configured ? (provider.error ? '降级' : '可用') : '未配置'}</span>`;
     group.appendChild(head);
 
-    for (const modelId of provider.models) {
+    for (const modelId of [...provider.models].sort(modelOrder)) {
       const meta = modelById(modelId);
       if (!meta) continue;
       const button = document.createElement('button');
       button.type = 'button';
-      button.className = `model-option${state.settings.model === meta.id ? ' selected' : ''}`;
+      button.className = `model-pick${state.settings.model === meta.id ? ' selected' : ''}`;
       button.dataset.model = meta.id;
       button.disabled = !provider.configured;
 
-      const tags = [];
-      if (meta.capabilities.vision) tags.push('视觉');
-      if (meta.thinking.mode === 'always') tags.push('始终思考');
-      else if (meta.thinking.mode === 'toggle') tags.push('深度思考');
-      else tags.push('可关思考');
-      if (meta.capabilities.tools) tags.push('工具');
-      if (meta.deprecated) tags.push('即将下线');
-      tags.push(`${formatContext(meta.contextWindow)} 上下文`);
-      tags.push(`最大 ${formatTokens(meta.maxOutput)}`);
+      const bits = [formatContext(meta.contextWindow)];
+      if (meta.capabilities.vision) bits.push('视觉');
+      if (meta.thinking.mode === 'always') bits.push('始终思考');
+      else if (meta.thinking.mode === 'optional') bits.push('可关思考');
+      if (meta.deprecated) bits.push('即将下线');
 
       button.innerHTML =
-        '<span class="model-radio"></span>' +
-        '<span class="model-option-main">' +
-        `<span class="model-option-name">${escapeHtml(meta.name)}</span>` +
-        `<span class="model-option-id">${escapeHtml(meta.id)}</span>` +
-        `<span class="model-option-tags">${tags.map((tag) => `<em>${escapeHtml(tag)}</em>`).join('')}</span>` +
-        '</span>';
+        '<span class="model-pick-main">' +
+        `<span class="model-pick-name">${escapeHtml(meta.name)}</span>` +
+        `<span class="model-pick-meta">${escapeHtml(bits.join(' · '))}</span>` +
+        '</span>' +
+        `<span class="model-pick-check">${icon('check')}</span>`;
       group.appendChild(button);
     }
     host.appendChild(group);
@@ -480,6 +489,61 @@ function selectModel(modelId) {
   }
   if (!meta.capabilities.title) patch.title = false;
   updateSetting(patch);
+  closeModelPicker();
+}
+
+const EFFORT_LABELS = { low: '快速', high: '均衡', max: '深入' };
+
+/** 滑条档位：可关思考的模型多一个“关闭”，始终思考的模型只有强度档。 */
+function effortSteps(meta) {
+  const efforts = (meta?.thinking?.efforts || []).filter((effort) => EFFORT_LABELS[effort]);
+  if (!efforts.length) return [];
+  const levels = efforts.map((value) => ({ value, label: EFFORT_LABELS[value] }));
+  if (meta.thinking.mode === 'always') return levels;
+  return [{ value: 'none', label: '关闭' }, ...levels];
+}
+
+function renderEffortControl() {
+  const control = $('#effort-control');
+  const slider = $('#effort-slider');
+  const label = $('#effort-label');
+  if (!control || !slider || !label) return;
+  const meta = currentModel();
+  const steps = effortSteps(meta);
+  if (!steps.length) {
+    control.hidden = true;
+    return;
+  }
+  control.hidden = false;
+  const current = state.settings.thinking ? state.settings.reasoning_effort : 'none';
+  let index = steps.findIndex((step) => step.value === current);
+  if (index < 0) index = steps.findIndex((step) => step.value === meta?.thinking.defaultEffort);
+  if (index < 0) index = steps.length - 1;
+  slider.min = '0';
+  slider.max = String(steps.length - 1);
+  slider.value = String(index);
+  slider.disabled = steps.length < 2;
+  label.textContent = steps[index].label;
+  slider.setAttribute('aria-valuetext', steps[index].label);
+  slider.title = `推理强度：${steps[index].label}`;
+}
+
+function toggleModelPicker(event) {
+  event?.stopPropagation();
+  const popover = $('#model-popover');
+  if (!popover) return;
+  const willOpen = popover.hidden;
+  if (willOpen) renderModelList();
+  popover.hidden = !willOpen;
+  $('#model-picker-btn')?.setAttribute('aria-expanded', String(willOpen));
+  closeMore();
+}
+
+function closeModelPicker() {
+  const popover = $('#model-popover');
+  if (!popover || popover.hidden) return;
+  popover.hidden = true;
+  $('#model-picker-btn')?.setAttribute('aria-expanded', 'false');
 }
 
 function syncSettingsUI() {
@@ -560,6 +624,13 @@ function syncSettingsUI() {
     chip.dataset.provider = meta?.provider || '';
     chip.title = meta ? `${meta.providerName} · ${meta.name}` : '';
   }
+  const pickerBtn = $('#model-picker-btn');
+  const pickerLabel = $('#model-picker-label');
+  const pickerDot = $('#model-dot');
+  if (pickerLabel) pickerLabel.textContent = meta?.name || '选择模型';
+  if (pickerDot) pickerDot.dataset.provider = meta?.provider || '';
+  if (pickerBtn) pickerBtn.title = meta ? `${meta.providerName} · ${meta.name}` : '切换模型';
+  renderEffortControl();
 
   const metaHost = $('#model-meta');
   if (metaHost) {
@@ -707,7 +778,7 @@ function renderConfigBits() {
   const site = config.site || {};
 
   if ($('#site-name')) $('#site-name').textContent = site.name || 'E-dreikanterbot';
-  if ($('#foot-version')) $('#foot-version').textContent = `v${config.version || '1.0.0'}`;
+  if ($('#foot-version')) $('#foot-version').textContent = `v${config.version || '2.2.0'}`;
   if ($('#chat-title') && !state.current) $('#chat-title').textContent = '新对话';
 
   const icp = site.icpNumber;
@@ -871,34 +942,27 @@ function renderMessages() {
 }
 
 function emptyState() {
-  const hour = new Date().getHours();
-  const greeting = hour < 6 ? '夜深了' : hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
   const suggestions = [
-    { icon: 'spark', title: '解释一个概念', text: '把量子纠缠讲给高中生听，用一个生活化比喻', prompt: '把量子纠缠讲给高中生听，用一个生活化比喻。' },
-    { icon: 'edit', title: '写一段代码', text: 'TypeScript 写带重试与超时的 fetch 封装', prompt: '用 TypeScript 写一个带重试与超时控制的 fetch 封装，并解释设计取舍。' },
-    { icon: 'link', title: '读一个链接', text: '总结 DeepSeek 官方文档要点', prompt: '请总结 https://api-docs.deepseek.com/ 的核心能力，并列出三个上手建议。' },
-    { icon: 'brain', title: '用记忆库', text: '记住我的偏好，之后自动适配', prompt: '请记住：我偏好中文回答，代码示例用 TypeScript，先给结论再解释。' },
+    { icon: 'spark', label: '解释一个概念', prompt: '把量子纠缠讲给高中生听，用一个生活化比喻。' },
+    { icon: 'edit', label: '写一段代码', prompt: '用 TypeScript 写一个带重试与超时控制的 fetch 封装，并解释设计取舍。' },
+    { icon: 'link', label: '读一个网页', prompt: '请读取 https://api-docs.deepseek.com/ ，总结核心能力并给出三个上手建议。' },
+    { icon: 'brain', label: '记住一个偏好', prompt: '请记住：我偏好中文回答，代码示例用 TypeScript，先给结论再解释。' },
   ];
   const wrapper = document.createElement('div');
   wrapper.className = 'empty';
   wrapper.innerHTML = `
-    <div class="empty-orb" aria-hidden="true">E</div>
-    <h1>${greeting}，今天想聊点什么？</h1>
-    <p class="lead">直连 DeepSeek 与 Kimi 官方 API 的双 Provider 聊天机器人：深度思考、长期记忆、图片理解与 OpenAI 兼容接口。</p>
+    <div class="empty-mark" aria-hidden="true">E</div>
+    <h1>今天想聊什么？</h1>
+    <p class="lead">DeepSeek / Kimi · 记忆、分支和草稿都会保留</p>
     <div class="suggestions">
       ${suggestions
         .map(
           (item) =>
-            `<button class="suggestion" data-prompt="${escapeHtml(item.prompt)}">${icon(item.icon)}` +
-            `<span><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.text)}</span></span></button>`,
+            `<button class="suggestion" data-prompt="${escapeHtml(item.prompt)}">` +
+            `${icon(item.icon)}<span>${escapeHtml(item.label)}</span></button>`,
         )
         .join('')}
-    </div>
-    <div class="empty-actions">
-      <button class="btn accent" data-action="max-settings">${icon('spark')} 参数拉满试试</button>
-      <button class="btn ghost" data-action="open-memory">${icon('brain')} 查看记忆库</button>
-    </div>
-    <div class="badge-row"><span>1M 上下文</span><span>双 Provider</span><span>流式思考</span><span>OpenAI 兼容接口</span></div>`;
+    </div>`;
   return wrapper;
 }
 
@@ -1062,19 +1126,26 @@ function thinkingLabel(msg) {
 }
 
 function footHtml(msg) {
-  const parts = [];
   const usage = msg.usage;
+  if (!usage && !msg.aborted) return '';
+  const parts = [];
+  let detail = '';
   if (usage) {
     parts.push(`↑ ${formatTokens(usage.prompt_tokens)}`);
     parts.push(`↓ ${formatTokens(usage.completion_tokens)}`);
-    const cached = Number(usage.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0);
-    if (usage.prompt_tokens) parts.push(`缓存 ${Math.round((cached / usage.prompt_tokens) * 100)}%`);
-    if (usage.cache_write_tokens) parts.push(`写入 ${formatTokens(usage.cache_write_tokens)}`);
     if (usage.cost) parts.push(formatCost(usage.cost, usage.currency));
+    const cached = Number(usage.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0);
+    const cachePct = usage.prompt_tokens ? Math.round((cached / usage.prompt_tokens) * 100) : 0;
+    detail = [
+      `缓存 ${cachePct}%`,
+      usage.cache_write_tokens ? `写入 ${formatTokens(usage.cache_write_tokens)}` : '',
+      usage.elapsedMs ? formatDuration(usage.elapsedMs) : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
   }
   if (msg.aborted) parts.push('已停止');
-  if (!parts.length) return '';
-  return parts.map((part) => `<span>${escapeHtml(part)}</span>`).join('<span class="sep"></span>');
+  return `<span title="${escapeHtml(detail)}">${parts.map((part) => escapeHtml(part)).join(' · ')}</span>`;
 }
 
 /* ==========================================================================
@@ -1986,6 +2057,7 @@ async function importMemory(file) {
    ========================================================================== */
 function openDrawer(name) {
   closeDrawer();
+  closeModelPicker();
   const drawer = name === 'settings' ? $('#settings-drawer') : $('#memory-drawer');
   if (!drawer) return;
   drawer.hidden = false;
@@ -2016,6 +2088,7 @@ function closeDrawer() {
 }
 
 function openSidebar() {
+  closeModelPicker();
   $('#sidebar')?.classList.add('open');
   $('#backdrop').hidden = false;
   closeMore();
@@ -2033,6 +2106,7 @@ function closeAllPanels() {
   closeDrawer();
   closeSidebar();
   closeMore();
+  closeModelPicker();
 }
 
 function closeMore() {
@@ -2043,6 +2117,7 @@ function closeMore() {
 
 function toggleMore(event) {
   event.stopPropagation();
+  closeModelPicker();
   const menu = $('#more-menu');
   if (!menu) return;
   menu.hidden = !menu.hidden;
@@ -2094,15 +2169,16 @@ async function submitLogin(event) {
    ========================================================================== */
 function openAbout() {
   closeMore();
+  const meta = currentModel();
   const body = document.createElement('div');
   body.className = 'about';
   body.innerHTML = `
-    <p class="about-lead">按 DeepSeek 官方 API 打造的聊天机器人：零依赖、单文件启动、全设备自适应。</p>
+    <p class="about-lead">DeepSeek + Kimi 双 Provider 聊天机器人，零依赖、单文件启动；模型与推理强度在输入框下方直接切换。</p>
     <div class="about-grid">
-      <div><span>版本</span><strong>v${escapeHtml(state.config?.version || '1.0.0')}</strong></div>
-      <div><span>默认模型</span><strong>${escapeHtml(state.config?.defaultModel || 'deepseek-flash')}</strong></div>
-      <div><span>上下文</span><strong>1,000,000 tokens</strong></div>
-      <div><span>最大输出</span><strong>393,216 tokens</strong></div>
+      <div><span>版本</span><strong>v${escapeHtml(state.config?.version || '2.2.0')}</strong></div>
+      <div><span>当前模型</span><strong>${escapeHtml(meta?.name || state.config?.defaultModel || '—')}</strong></div>
+      <div><span>上下文</span><strong>${meta ? formatContext(meta.contextWindow) : '—'} tokens</strong></div>
+      <div><span>最大输出</span><strong>${meta ? formatTokens(meta.maxOutput) : '—'} tokens</strong></div>
     </div>
     <h4>快捷键</h4>
     <ul class="about-keys">
@@ -2120,6 +2196,7 @@ function openAbout() {
     <p class="about-foot">
       文档：<a href="https://github.com/Ansel-official/E-dreikanterbot" target="_blank" rel="noopener">GitHub 仓库</a>
       · <a href="https://api-docs.deepseek.com/" target="_blank" rel="noopener">DeepSeek API Docs</a>
+      · <a href="https://platform.kimi.com/docs" target="_blank" rel="noopener">Kimi API Docs</a>
     </p>
     <p class="about-foot" id="about-icp"></p>
   `;
@@ -2320,9 +2397,17 @@ function bindEvents() {
   });
 
   /* 设置面板 */
-  $('#model-list')?.addEventListener('click', (event) => {
+  $('#model-picker-list')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-model]');
     if (button && !button.disabled) selectModel(button.dataset.model);
+  });
+
+  $('#effort-slider')?.addEventListener('input', (event) => {
+    const steps = effortSteps(currentModel());
+    const step = steps[Number(event.target.value)];
+    if (!step) return;
+    if (step.value === 'none') updateSetting({ thinking: false, reasoning_effort: 'none' });
+    else updateSetting({ thinking: true, reasoning_effort: step.value });
   });
 
   $('#thinking-switch')?.addEventListener('click', () => {
@@ -2462,8 +2547,13 @@ function onDocumentClick(event) {
       'close-drawer': () => closeDrawer(),
       'open-sidebar': () => openSidebar(),
       'close-sidebar': () => closeSidebar(),
-      'toggle-theme': () => cycleTheme(),
+      'toggle-theme': () => {
+        cycleTheme();
+        closeMore();
+      },
       'toggle-more': (event) => toggleMore(event),
+      'toggle-model-picker': (event) => toggleModelPicker(event),
+      'close-model-picker': () => closeModelPicker(),
       'scroll-bottom': () => {
         state.stickToBottom = true;
         scrollToBottom(true);
@@ -2565,6 +2655,9 @@ function onDocumentClick(event) {
   }
 
   if (!event.target.closest('.more-wrap')) closeMore();
+  if (!event.target.closest('#model-popover') && !event.target.closest('#model-picker-btn')) {
+    closeModelPicker();
+  }
   if (event.target.id === 'backdrop') {
     closeDrawer();
     closeSidebar();

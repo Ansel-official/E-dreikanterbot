@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>E-dreikanterbot V2.1.R · DeepSeek + Kimi 原生聊天机器人</title>
-    <meta name="description" content="E-dreikanterbot：按 DeepSeek 与 Kimi 官方 API 打造的双 Provider 聊天机器人，支持深度思考、长期记忆库、图片理解、联网搜索与 OpenAI 兼容接口。" />
-    <meta name="theme-color" content="#f7f7f5" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)" />
+    <title>E-dreikanterbot V2.2 · DeepSeek + Kimi</title>
+    <meta name="description" content="E-dreikanterbot V2.2：简洁高效的 DeepSeek / Kimi 聊天界面，底部切换模型与推理强度，保留长期记忆、多会话与消息分支。" />
+    <meta name="theme-color" content="#fbfbfa" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0e10" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="E-dreikanterbot" />
     <meta name="format-detection" content="telephone=no" />
@@ -14,7 +14,7 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="/styles.css?v=10" />
+    <link rel="stylesheet" href="/styles.css?v=14" />
   </head>
   <body>
     <svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true">
@@ -63,7 +63,7 @@
           <div class="brand-mark" aria-hidden="true">E<span></span></div>
           <div class="brand-text">
             <strong>E-dreikanterbot</strong>
-            <span>DeepSeek + Kimi · 记忆增强</span>
+            <span>DeepSeek · Kimi</span>
           </div>
           <button class="icon-btn only-mobile" data-action="close-sidebar" aria-label="关闭侧栏">
             <svg class="icon"><use href="#i-x" /></svg>
@@ -94,13 +94,9 @@
             <span>参数与设置</span>
           </button>
           <div class="foot-links">
-            <a id="github-link" href="https://github.com/Ansel-official/E-dreikanterbot" target="_blank" rel="noopener">
-              <svg class="icon"><use href="#i-github" /></svg> GitHub
-            </a>
-            <span>·</span>
             <a id="icp-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">ICP 备案</a>
           </div>
-          <div class="foot-version" id="foot-version">v1.0.0</div>
+          <div class="foot-version" id="foot-version">v2.2.0</div>
         </div>
       </aside>
 
@@ -111,13 +107,6 @@
           </button>
           <div class="topbar-title" id="chat-title" title="会话标题">新对话</div>
           <div class="topbar-actions">
-            <button class="model-chip" id="model-chip" data-action="open-settings" title="切换模型">flash</button>
-            <button class="icon-btn" data-action="open-memory" title="记忆库" aria-label="记忆库">
-              <svg class="icon"><use href="#i-brain" /></svg>
-            </button>
-            <button class="icon-btn" data-action="open-settings" title="参数" aria-label="参数">
-              <svg class="icon"><use href="#i-sliders" /></svg>
-            </button>
             <button class="icon-btn" id="theme-btn" data-action="toggle-theme" title="切换主题" aria-label="切换主题">
               <svg class="icon"><use href="#i-sun" /></svg>
             </button>
@@ -126,13 +115,15 @@
                 <svg class="icon"><use href="#i-more" /></svg>
               </button>
               <div class="menu" id="more-menu" hidden>
-                <button data-action="export-md"><svg class="icon"><use href="#i-download" /></svg>导出 Markdown</button>
-                <button data-action="export-json"><svg class="icon"><use href="#i-download" /></svg>导出 JSON</button>
-                <button data-action="export-memory"><svg class="icon"><use href="#i-download" /></svg>导出记忆库</button>
-                <button data-action="import"><svg class="icon"><use href="#i-upload" /></svg>导入对话</button>
-                <button data-action="import-memory"><svg class="icon"><use href="#i-upload" /></svg>导入记忆库</button>
-                <button data-action="remember-conversation"><svg class="icon"><use href="#i-brain" /></svg>记住这段对话</button>
+                <button data-action="open-memory"><svg class="icon"><use href="#i-brain" /></svg>记忆库</button>
+                <button data-action="open-settings"><svg class="icon"><use href="#i-sliders" /></svg>高级设置</button>
+                <button data-action="toggle-theme"><svg class="icon"><use href="#i-sun" /></svg>切换主题</button>
                 <button data-action="read-url"><svg class="icon"><use href="#i-link" /></svg>读取网页</button>
+                <button data-action="remember-conversation"><svg class="icon"><use href="#i-brain" /></svg>记住这段对话</button>
+                <button data-action="export-json"><svg class="icon"><use href="#i-download" /></svg>导出对话</button>
+                <button data-action="import"><svg class="icon"><use href="#i-upload" /></svg>导入对话</button>
+                <button data-action="export-memory"><svg class="icon"><use href="#i-download" /></svg>导出记忆库</button>
+                <button data-action="import-memory"><svg class="icon"><use href="#i-upload" /></svg>导入记忆库</button>
                 <button data-action="install" id="install-item" hidden><svg class="icon"><use href="#i-download" /></svg>安装到本机</button>
                 <button data-action="about"><svg class="icon"><use href="#i-info" /></svg>关于与快捷键</button>
                 <button data-action="logout" id="logout-item" hidden><svg class="icon"><use href="#i-logout" /></svg>退出登录</button>
@@ -149,33 +140,45 @@
         </button>
 
         <footer class="composer-wrap">
-          <div class="usage-bar" id="usage-bar" hidden>
-            <span id="usage-text"></span>
-            <span class="usage-tier" id="usage-tier"></span>
-          </div>
-
           <form class="composer" id="composer-form" autocomplete="off">
             <div class="attachments" id="attachments" hidden></div>
             <div class="composer-row">
-              <button class="icon-btn attach-btn voice-btn" id="voice-btn" type="button" data-action="voice" title="语音输入" aria-label="语音输入">
-                <svg class="icon"><use href="#i-mic" /></svg>
-              </button>
-              <button class="icon-btn attach-btn" type="button" data-action="attach" title="添加图片或文本文件" aria-label="添加附件">
-                <svg class="icon"><use href="#i-clip" /></svg>
-              </button>
-              <textarea id="composer" rows="1" placeholder="给 E-dreikanterbot 发消息…" aria-label="消息输入框"></textarea>
+              <textarea id="composer" rows="1" placeholder="输入消息…" aria-label="消息输入框"></textarea>
               <button class="send-btn" id="send-btn" type="submit" title="发送" aria-label="发送">
                 <svg class="icon"><use href="#i-send" /></svg>
               </button>
             </div>
-            <div class="composer-meta">
-              <span class="composer-hint" id="composer-hint">Enter 发送 · Shift+Enter 换行</span>
-              <span class="composer-toggles">
-                <button class="mini-toggle" type="button" data-action="toggle-thinking" id="thinking-toggle">思考</button>
-                <button class="mini-toggle" type="button" data-action="toggle-web" id="web-toggle">联网</button>
-              </span>
+            <div class="composer-toolbar">
+              <div class="toolbar-left">
+                <button class="tool-btn" type="button" data-action="attach" title="添加附件" aria-label="添加附件">
+                  <svg class="icon"><use href="#i-clip" /></svg>
+                </button>
+                <button class="tool-btn voice-btn" id="voice-btn" type="button" data-action="voice" title="语音输入" aria-label="语音输入">
+                  <svg class="icon"><use href="#i-mic" /></svg>
+                </button>
+              </div>
+              <div class="toolbar-right">
+                <button class="model-picker-btn" id="model-picker-btn" type="button" data-action="toggle-model-picker" aria-haspopup="listbox" aria-expanded="false" title="切换模型">
+                  <span class="model-dot" id="model-dot"></span>
+                  <span class="model-picker-label" id="model-picker-label">选择模型</span>
+                  <svg class="icon chevron"><use href="#i-chevron" /></svg>
+                </button>
+                <div class="effort-control" id="effort-control" title="推理强度">
+                  <span class="effort-label" id="effort-label">均衡</span>
+                  <input class="effort-slider" id="effort-slider" type="range" min="0" max="2" step="1" value="2" aria-label="推理强度" />
+                </div>
+              </div>
             </div>
           </form>
+
+          <div class="model-popover" id="model-popover" hidden role="listbox" aria-label="选择模型">
+            <div class="model-popover-head">
+              <span>选择模型</span>
+              <button class="icon-btn" type="button" data-action="close-model-picker" aria-label="关闭"><svg class="icon"><use href="#i-x" /></svg></button>
+            </div>
+            <div class="model-popover-list" id="model-picker-list"></div>
+            <div class="model-popover-foot">切换模型后，推理强度会自动适配当前模型。</div>
+          </div>
 
           <div class="site-foot">
             <span>© 2026 <span id="site-name">E-dreikanterbot</span></span>
@@ -199,24 +202,7 @@
           </button>
         </div>
         <div class="drawer-body">
-          <section class="field-group">
-            <h3>模型</h3>
-            <div class="model-list" id="model-list"></div>
-            <div class="model-meta" id="model-meta"></div>
-          </section>
-
-          <section class="field-group">
-            <div class="switch-row">
-              <div><h3>深度思考</h3><p class="hint">回答前先输出思维链，可用 effort 控制强度</p></div>
-              <button class="switch" id="thinking-switch" type="button" role="switch" aria-checked="true"></button>
-            </div>
-            <div class="segmented" id="effort-seg" role="group" aria-label="思考强度">
-              <button type="button" data-effort="low">low</button>
-              <button type="button" data-effort="high">high</button>
-              <button type="button" data-effort="max">max</button>
-            </div>
-            <p class="hint" id="thinking-hint">思考模式下 temperature / top_p 会被官方忽略，这是预期行为。</p>
-          </section>
+          <p class="drawer-note drawer-note-top">模型与推理强度在输入框下方直接切换；这里只保留高级参数。</p>
 
           <section class="field-group">
             <h3>最大输出 tokens</h3>
@@ -231,50 +217,53 @@
             <p class="hint" id="max-tokens-hint">官方上限 393216（384K）。实际消耗以 API 返回的 usage 为准。</p>
           </section>
 
-          <section class="field-group">
-            <div class="range-head"><h3>temperature</h3><span class="range-value" id="temperature-value">1.00</span></div>
-            <input class="range" id="temperature" type="range" min="0" max="2" step="0.05" />
-            <div class="range-head"><h3>top_p</h3><span class="range-value" id="top-p-value">0.95</span></div>
-            <input class="range" id="top-p" type="range" min="0.01" max="1" step="0.01" />
-          </section>
+          <details class="drawer-advanced">
+            <summary>采样、工具与安全</summary>
+            <section class="field-group">
+              <div class="range-head"><h3>temperature</h3><span class="range-value" id="temperature-value">1.00</span></div>
+              <input class="range" id="temperature" type="range" min="0" max="2" step="0.05" />
+              <div class="range-head"><h3>top_p</h3><span class="range-value" id="top-p-value">0.95</span></div>
+              <input class="range" id="top-p" type="range" min="0.01" max="1" step="0.01" />
+            </section>
 
-          <section class="field-group">
-            <h3>停止序列</h3>
-            <textarea class="text-input" id="stop-sequences" rows="2" placeholder="每行一个，最多 16 个"></textarea>
-            <p class="hint">官方限制：每个序列 ≤ 512 字节。</p>
-          </section>
+            <section class="field-group">
+              <h3>停止序列</h3>
+              <textarea class="text-input" id="stop-sequences" rows="2" placeholder="每行一个，最多 16 个"></textarea>
+              <p class="hint">官方限制：每个序列 ≤ 512 字节。</p>
+            </section>
 
-          <section class="field-group">
-            <div class="switch-row">
-              <div><h3>JSON 输出</h3><p class="hint">response_format = json_object</p></div>
-              <button class="switch" id="json-switch" type="button" role="switch" aria-checked="false"></button>
-            </div>
-            <div class="switch-row">
-              <div><h3>联网搜索</h3><p class="hint">官方 deepseek_web_search 工具</p></div>
-              <button class="switch" id="web-search-switch" type="button" role="switch" aria-checked="false"></button>
-            </div>
-            <div class="switch-row">
-              <div><h3>读取链接</h3><p class="hint">官方 deepseek_read_url 工具</p></div>
-              <button class="switch" id="read-url-switch" type="button" role="switch" aria-checked="false"></button>
-            </div>
-            <div class="switch-row">
-              <div><h3>长期记忆</h3><p class="hint">注入记忆库，并允许模型调用 remember_fact</p></div>
-              <button class="switch" id="memory-switch" type="button" role="switch" aria-checked="true"></button>
-            </div>
-            <div class="switch-row">
-              <div><h3>自动标题</h3><p class="hint">使用官方 title 扩展为会话命名</p></div>
-              <button class="switch" id="title-switch" type="button" role="switch" aria-checked="true"></button>
-            </div>
-          </section>
+            <section class="field-group">
+              <div class="switch-row">
+                <div><h3>JSON 输出</h3><p class="hint">response_format = json_object</p></div>
+                <button class="switch" id="json-switch" type="button" role="switch" aria-checked="false"></button>
+              </div>
+              <div class="switch-row">
+                <div><h3>联网搜索</h3><p class="hint">官方 deepseek_web_search 工具</p></div>
+                <button class="switch" id="web-search-switch" type="button" role="switch" aria-checked="false"></button>
+              </div>
+              <div class="switch-row">
+                <div><h3>读取链接</h3><p class="hint">官方 deepseek_read_url 工具</p></div>
+                <button class="switch" id="read-url-switch" type="button" role="switch" aria-checked="false"></button>
+              </div>
+              <div class="switch-row">
+                <div><h3>长期记忆</h3><p class="hint">注入记忆库，并允许模型调用 remember_fact</p></div>
+                <button class="switch" id="memory-switch" type="button" role="switch" aria-checked="true"></button>
+              </div>
+              <div class="switch-row">
+                <div><h3>自动标题</h3><p class="hint">使用官方 title 扩展为会话命名</p></div>
+                <button class="switch" id="title-switch" type="button" role="switch" aria-checked="true"></button>
+              </div>
+            </section>
 
-          <section class="field-group">
-            <h3>内容安全</h3>
-            <div class="segmented" id="safety-seg" role="group" aria-label="内容安全">
-              <button type="button" data-safety="high">high（公共服务）</button>
-              <button type="button" data-safety="low">low（默认）</button>
-            </div>
-            <p class="hint" id="safety-hint">面向公众提供服务时，请保持 high 并落实内容审核、生成式 AI 备案与标识义务。</p>
-          </section>
+            <section class="field-group">
+              <h3>内容安全</h3>
+              <div class="segmented" id="safety-seg" role="group" aria-label="内容安全">
+                <button type="button" data-safety="high">high（公共服务）</button>
+                <button type="button" data-safety="low">low（默认）</button>
+              </div>
+              <p class="hint" id="safety-hint">面向公众提供服务时，请保持 high 并落实内容审核、生成式 AI 备案与标识义务。</p>
+            </section>
+          </details>
 
           <section class="field-group">
             <details class="json-details">
@@ -289,7 +278,7 @@
           </div>
 
           <p class="drawer-note">
-            参数含义与取值范围见 <code>docs/API.md</code>。缓存命中会在下方用量条显示。
+            参数含义与取值范围见 <code>docs/API.md</code>。缓存命中显示在每条回答下方。
           </p>
         </div>
       </aside>
@@ -346,6 +335,6 @@
       <input type="file" id="memory-import-input" accept="application/json,.json" hidden />
     </div>
 
-    <script type="module" src="/app.js?v=12"></script>
+    <script type="module" src="/app.js?v=16"></script>
   </body>
 </html>

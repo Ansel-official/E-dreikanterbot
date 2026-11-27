@@ -1,6 +1,6 @@
 {
   "name": "e-dreikanterbot",
-  "version": "2.1.0-R",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "description": "E-dreikanterbot — 按 DeepSeek 官方 API 打造的零依赖聊天机器人：记忆库、流式思考、OpenAI 兼容接口、全设备自适应",

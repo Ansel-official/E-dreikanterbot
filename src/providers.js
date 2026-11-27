@@ -198,7 +198,7 @@ function mergeDynamic(def, item, preset) {
 
   return {
     ...base,
-    name: item?.name || base.name,
+    name: preset ? base.name : item?.name || base.name,
     contextWindow,
     maxOutput,
     inputModalities,

@@ -157,7 +157,7 @@ curl -N http://localhost:8788/api/chat \
   -d '{"message":"你好","settings":{"thinking":true,"reasoning_effort":"max","max_tokens":4096}}'
 ```
 
-V2.1.R 的额外字段：
+V2.2 的额外字段：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -253,7 +253,7 @@ frequency_penalty, presence_penalty
 ### 3.3 `GET /v1/health`
 
 ```json
-{ "ok": true, "version": "2.1.0-R", "models": ["deepseek-flash", "deepseek-v4-pro", "kimi-k3.1-pro"] }
+{ "ok": true, "version": "2.2.0", "models": ["deepseek-flash", "deepseek-v4-pro", "kimi-k3.1-pro"] }
 ```
 
 ---
